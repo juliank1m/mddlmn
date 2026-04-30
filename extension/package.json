@@ -1,0 +1,41 @@
+{
+  "name": "mddlmn-vscode",
+  "displayName": "mddlmn",
+  "description": "VS Code shell for the mddlmn local AI proxy.",
+  "version": "0.1.0",
+  "publisher": "mddlmn",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:mddlmn.openPanel"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "mddlmn.openPanel",
+        "title": "mddlmn: Open Panel"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.17",
+    "@types/vscode": "^1.90.0",
+    "@types/ws": "^8.18.1",
+    "@vscode/vsce": "^3.2.2",
+    "typescript": "^5.8.3"
+  }
+}
