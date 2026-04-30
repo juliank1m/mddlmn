@@ -21,6 +21,7 @@
  */
 
 import Fastify from "fastify";
+import { registerApiRoutes } from "./api/routes.js";
 import { handleRequest } from "./proxy/handler.js";
 
 const PORT = parseInt(process.env.MDDLMN_PORT ?? "8080", 10);
@@ -47,14 +48,16 @@ app.addContentTypeParser("*", { parseAs: "string" }, (_req, body, done) => {
   done(null, body);
 });
 
-// Catch-all route: every request to any path gets proxied.
-// Claude Code primarily hits POST /v1/messages, but there may be
-// other endpoints (like /v1/models for model listing). We proxy
-// everything so nothing breaks.
-app.all("/*", handleRequest);
-
 async function start(): Promise<void> {
   try {
+    await registerApiRoutes(app);
+
+    // Catch-all route: every non-API request to any path gets proxied.
+    // Claude Code primarily hits POST /v1/messages, but there may be
+    // other endpoints (like /v1/models for model listing). We proxy
+    // everything so nothing breaks.
+    app.all("/*", handleRequest);
+
     await app.listen({ port: PORT, host: "0.0.0.0" });
     console.log(`[mddlmn] Proxy listening on http://localhost:${PORT}`);
     console.log(`[mddlmn] Set ANTHROPIC_BASE_URL=http://localhost:${PORT} to use`);
