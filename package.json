@@ -1,0 +1,19 @@
+{
+  "name": "middleman",
+  "version": "0.1.0",
+  "description": "Observability and control layer for AI coding agents",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "fastify": "^5.3.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "tsx": "^4.19.4",
+    "@types/node": "^22.15.17"
+  }
+}
