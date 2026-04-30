@@ -10,6 +10,15 @@ import { DiffTab } from "./tabs/DiffTab";
 import { TimelineTab } from "./tabs/TimelineTab";
 import { TokensTab } from "./tabs/TokensTab";
 import { formatTokens } from "./lib/format";
+import frontendLogo from "./assets/frontend_logo.jpeg";
+
+declare global {
+  interface Window {
+    __MDDLMN_ASSETS__?: {
+      logo?: string;
+    };
+  }
+}
 
 const TABS: Array<{ key: TabKey; label: string; symbol: string }> = [
   { key: "inspector", label: "inspector", symbol: "01" },
@@ -72,12 +81,12 @@ export function App() {
 }
 
 function Header({ status, sessionLabel }: { status: ReturnType<typeof useStore.getState>["status"]; sessionLabel?: string }) {
+  const logoSrc = window.__MDDLMN_ASSETS__?.logo ?? frontendLogo;
+
   return (
-    <header className="border-b border-bone-400/10 px-6 py-4 flex items-center gap-6 relative">
-      <div className="flex items-baseline gap-3">
-        <span className="font-display italic text-2xl text-bone-50 leading-none">
-          mddlmn
-        </span>
+    <header className="border-b border-bone-400/10 px-6 py-2.5 flex items-center gap-6 relative">
+      <div className="flex items-center gap-4">
+        <img src={logoSrc} alt="mddlmn" className="h-14 w-auto shrink-0" />
         <span className="text-[10px] uppercase tracking-widest2 text-bone-400">
           interceptor v0.1
         </span>

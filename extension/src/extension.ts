@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
 import * as vscode from "vscode";
@@ -357,8 +357,11 @@ function getWebviewHtml(webview: vscode.Webview, extensionPath: string): string 
 
   const jsMatch = indexHtml.match(/src="(\/assets\/[^"]+\.js)"/);
   const cssMatch = indexHtml.match(/href="(\/assets\/[^"]+\.css)"/);
+  const logoFile = readdirSync(path.join(distDir, "assets")).find((file) =>
+    /^frontend_logo-.+\.(?:jpeg|jpg|png)$/.test(file)
+  );
 
-  if (!jsMatch || !cssMatch) {
+  if (!jsMatch || !cssMatch || !logoFile) {
     return `<html><body>Build assets not found. Run: cd frontend && npm run build</body></html>`;
   }
 
@@ -368,6 +371,9 @@ function getWebviewHtml(webview: vscode.Webview, extensionPath: string): string 
   );
   const cssUri = webview.asWebviewUri(
     vscode.Uri.file(path.join(distDir, cssMatch[1]))
+  );
+  const logoUri = webview.asWebviewUri(
+    vscode.Uri.file(path.join(distDir, "assets", logoFile))
   );
 
   // Google Fonts is loaded from the CDN. The CSP must allow it.
@@ -397,6 +403,9 @@ function getWebviewHtml(webview: vscode.Webview, extensionPath: string): string 
 </head>
 <body>
   <div id="root"></div>
+  <script nonce="${nonce}">
+    window.__MDDLMN_ASSETS__ = { logo: "${logoUri}" };
+  </script>
   <script type="module" nonce="${nonce}" src="${jsUri}"></script>
 </body>
 </html>`;
