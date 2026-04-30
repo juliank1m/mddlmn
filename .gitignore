@@ -1,4 +1,5 @@
 dist/
+*.tsbuildinfo
 logs/
 data/
 node_modules/
