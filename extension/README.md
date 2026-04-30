@@ -4,6 +4,15 @@ This is the VS Code shell for mddlmn. On activation it:
 
 - starts the local proxy server on an available port
 - injects `ANTHROPIC_BASE_URL` into integrated terminals
-- opens a webview panel with a postMessage bridge for REST and websocket traffic
+- shows the active proxy port in the status bar
+- opens the React inspector in a webview panel
+- bridges webview REST and websocket traffic to the local proxy
 
-The React frontend lands in Step 6. Until then, the webview is a small status page that exercises the same bridge contract the frontend will use.
+## Development
+
+```sh
+npm install
+npm run build
+```
+
+For local debugging, open this folder in VS Code and run the included extension launch configuration.
