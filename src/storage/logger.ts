@@ -17,7 +17,7 @@
  * conversation, etc.) but for now one file per proxy run is fine.
  */
 
-import { appendFile, mkdir, stat } from "node:fs/promises";
+import { open, appendFile, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 
 export const LOG_DIR = path.resolve("logs");
@@ -86,5 +86,43 @@ export async function log(entry: LogEntry): Promise<number | null> {
   } catch (err) {
     console.error("[logger] Failed to write log entry:", err);
     return null;
+  }
+}
+
+export async function readLogEntryAtOffset(
+  filePath: string,
+  offset: number | null
+): Promise<LogEntry | null> {
+  if (offset === null) {
+    return null;
+  }
+
+  const file = await open(filePath, "r");
+  try {
+    let line = "";
+    const buffer = Buffer.alloc(4096);
+    let position = offset;
+
+    while (true) {
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, position);
+      if (bytesRead === 0) {
+        break;
+      }
+
+      const chunk = buffer.subarray(0, bytesRead).toString("utf-8");
+      const newlineIndex = chunk.indexOf("\n");
+
+      if (newlineIndex >= 0) {
+        line += chunk.slice(0, newlineIndex);
+        break;
+      }
+
+      line += chunk;
+      position += bytesRead;
+    }
+
+    return line ? (JSON.parse(line) as LogEntry) : null;
+  } finally {
+    await file.close();
   }
 }

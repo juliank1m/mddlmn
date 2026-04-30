@@ -75,6 +75,84 @@ export type RequestRecordInput = {
   rawLogOffset: number | null;
 };
 
+export type SessionRecord = {
+  id: string;
+  startedAt: string;
+  agentType: string | null;
+  logFile: string | null;
+  requestCount: number;
+  totalTokens: number | null;
+};
+
+export type RequestRecord = {
+  id: string;
+  sessionId: string;
+  timestamp: string;
+  path: string;
+  model: string | null;
+  totalTokens: number | null;
+  totalCost: number | null;
+  isMainConversation: boolean;
+  isTopLevel: boolean;
+  lastUserPreview: string | null;
+  durationMs: number | null;
+  rawLogOffset: number | null;
+};
+
+export type SectionRecord = {
+  id: string;
+  requestId: string;
+  type: string;
+  label: string | null;
+  tokenCount: number | null;
+  contentHash: string | null;
+  content: string | null;
+};
+
+export type TokenStatsPoint = {
+  requestId: string;
+  timestamp: string;
+  totalTokens: number | null;
+  sectionTokens: Array<{
+    type: string;
+    tokenCount: number;
+  }>;
+};
+
+type SessionRow = {
+  id: string;
+  started_at: string;
+  agent_type: string | null;
+  log_file: string | null;
+  request_count: number;
+  total_tokens: number | null;
+};
+
+type RequestRow = {
+  id: string;
+  session_id: string;
+  timestamp: string;
+  path: string;
+  model: string | null;
+  total_tokens: number | null;
+  total_cost: number | null;
+  is_main_conversation: 0 | 1;
+  is_top_level: 0 | 1;
+  last_user_preview: string | null;
+  duration_ms: number | null;
+  raw_log_offset: number | null;
+};
+
+type SectionRow = {
+  id: string;
+  request_id: string;
+  type: string;
+  label: string | null;
+  token_count: number | null;
+  content_hash: string | null;
+  content: string | null;
+};
+
 const upsertRequestStmt = db.prepare(`
   INSERT INTO requests (
     id,
@@ -143,6 +221,68 @@ const updateDurationStmt = db.prepare(`
   WHERE id = @id
 `);
 
+const listSessionsStmt = db.prepare(`
+  SELECT
+    sessions.id,
+    sessions.started_at,
+    sessions.agent_type,
+    sessions.log_file,
+    COUNT(requests.id) AS request_count,
+    SUM(requests.total_tokens) AS total_tokens
+  FROM sessions
+  LEFT JOIN requests ON requests.session_id = sessions.id
+  GROUP BY sessions.id
+  ORDER BY sessions.started_at DESC
+`);
+
+const getSessionStmt = db.prepare(`
+  SELECT
+    sessions.id,
+    sessions.started_at,
+    sessions.agent_type,
+    sessions.log_file,
+    COUNT(requests.id) AS request_count,
+    SUM(requests.total_tokens) AS total_tokens
+  FROM sessions
+  LEFT JOIN requests ON requests.session_id = sessions.id
+  WHERE sessions.id = ?
+  GROUP BY sessions.id
+`);
+
+const listRequestsForSessionStmt = db.prepare(`
+  SELECT *
+  FROM requests
+  WHERE session_id = ?
+  ORDER BY timestamp ASC
+`);
+
+const getRequestStmt = db.prepare(`
+  SELECT *
+  FROM requests
+  WHERE id = ?
+`);
+
+const listSectionsForRequestStmt = db.prepare(`
+  SELECT *
+  FROM sections
+  WHERE request_id = ?
+  ORDER BY rowid ASC
+`);
+
+const tokenStatsStmt = db.prepare(`
+  SELECT
+    requests.id AS request_id,
+    requests.timestamp,
+    requests.total_tokens,
+    sections.type,
+    COALESCE(SUM(sections.token_count), 0) AS token_count
+  FROM requests
+  LEFT JOIN sections ON sections.request_id = requests.id
+  WHERE requests.session_id = ?
+  GROUP BY requests.id, sections.type
+  ORDER BY requests.timestamp ASC
+`);
+
 const replaceSectionsTx = db.transaction((requestId: string, sections: Section[]) => {
   deleteSectionsStmt.run(requestId);
 
@@ -180,4 +320,99 @@ export function updateRequestDuration(requestId: string, durationMs: number): vo
 
 export function getCurrentSessionId(): string {
   return session.id;
+}
+
+function sessionFromRow(row: SessionRow): SessionRecord {
+  return {
+    id: row.id,
+    startedAt: row.started_at,
+    agentType: row.agent_type,
+    logFile: row.log_file,
+    requestCount: row.request_count,
+    totalTokens: row.total_tokens,
+  };
+}
+
+function requestFromRow(row: RequestRow): RequestRecord {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    timestamp: row.timestamp,
+    path: row.path,
+    model: row.model,
+    totalTokens: row.total_tokens,
+    totalCost: row.total_cost,
+    isMainConversation: row.is_main_conversation === 1,
+    isTopLevel: row.is_top_level === 1,
+    lastUserPreview: row.last_user_preview,
+    durationMs: row.duration_ms,
+    rawLogOffset: row.raw_log_offset,
+  };
+}
+
+function sectionFromRow(row: SectionRow): SectionRecord {
+  return {
+    id: row.id,
+    requestId: row.request_id,
+    type: row.type,
+    label: row.label,
+    tokenCount: row.token_count,
+    contentHash: row.content_hash,
+    content: row.content,
+  };
+}
+
+export function listSessions(): SessionRecord[] {
+  return (listSessionsStmt.all() as SessionRow[]).map(sessionFromRow);
+}
+
+export function getSession(id: string): SessionRecord | null {
+  const row = getSessionStmt.get(id) as SessionRow | undefined;
+  return row ? sessionFromRow(row) : null;
+}
+
+export function listRequestsForSession(sessionId: string): RequestRecord[] {
+  return (listRequestsForSessionStmt.all(sessionId) as RequestRow[]).map(requestFromRow);
+}
+
+export function getRequest(id: string): RequestRecord | null {
+  const row = getRequestStmt.get(id) as RequestRow | undefined;
+  return row ? requestFromRow(row) : null;
+}
+
+export function listSectionsForRequest(requestId: string): SectionRecord[] {
+  return (listSectionsForRequestStmt.all(requestId) as SectionRow[]).map(sectionFromRow);
+}
+
+export function getTokenStats(sessionId: string): TokenStatsPoint[] {
+  const rows = tokenStatsStmt.all(sessionId) as Array<{
+    request_id: string;
+    timestamp: string;
+    total_tokens: number | null;
+    type: string | null;
+    token_count: number;
+  }>;
+  const points = new Map<string, TokenStatsPoint>();
+
+  for (const row of rows) {
+    let point = points.get(row.request_id);
+    if (!point) {
+      point = {
+        requestId: row.request_id,
+        timestamp: row.timestamp,
+        totalTokens: row.total_tokens,
+        sectionTokens: [],
+      };
+      points.set(row.request_id, point);
+    }
+
+    if (row.type !== null) {
+      point.sectionTokens.push({
+        type: row.type,
+        tokenCount: row.token_count,
+      });
+    }
+  }
+
+  return Array.from(points.values());
 }
