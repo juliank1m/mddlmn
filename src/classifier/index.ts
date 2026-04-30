@@ -262,6 +262,37 @@ export function detectRequestKind(
 
   return {
     isMainConversation,
-    isTopLevel: isMainConversation && !!extractLastUserPreview(request),
+    isTopLevel: isMainConversation && isUserInitiated(request),
   };
+}
+
+function isUserInitiated(request: AnthropicRequest): boolean {
+  if (!Array.isArray(request.messages) || request.messages.length === 0) return false;
+
+  // Walk backwards to find the last user-role message
+  for (let i = request.messages.length - 1; i >= 0; i--) {
+    const msg = request.messages[i];
+    if (!isRecord(msg) || msg.role !== "user") continue;
+
+    const content = msg.content;
+
+    // String content — must be non-injected text
+    if (typeof content === "string") return !looksInjected(content);
+
+    // Array content — top-level if it contains at least one plain text block
+    // (not a tool_result and not injected context)
+    if (Array.isArray(content)) {
+      return content.some(
+        (block) =>
+          isRecord(block) &&
+          block.type === "text" &&
+          typeof block.text === "string" &&
+          !looksInjected(block.text)
+      );
+    }
+
+    return false;
+  }
+
+  return false;
 }

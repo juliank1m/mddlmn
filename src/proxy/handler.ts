@@ -39,8 +39,19 @@ import {
   parseAnthropicRequest,
   type Section,
 } from "../classifier/index.js";
+import { parseResponseSections } from "../classifier/response-parser.js";
 import { countTokens } from "../classifier/token-counter.js";
-import { replaceRequestSections, updateRequestDuration, upsertRequest } from "../storage/db.js";
+import {
+  getCurrentSessionId,
+  replaceRequestSections,
+  updateRequestDuration,
+  upsertRequest,
+} from "../storage/db.js";
+import {
+  broadcastNewRequest,
+  broadcastRequestClassified,
+  type RequestKind,
+} from "../ws/manager.js";
 
 const STRIPPED_RESPONSE_HEADERS = new Set([
   "connection",
@@ -71,6 +82,70 @@ function modelFromRequestBody(rawBody: string): string | null {
   }
 }
 
+function requestKindForEvent(requestKind: {
+  isMainConversation: boolean;
+  isTopLevel: boolean;
+}): RequestKind {
+  if (requestKind.isTopLevel) {
+    return "top_level";
+  }
+
+  if (requestKind.isMainConversation) {
+    return "tool_chain";
+  }
+
+  return "aux";
+}
+
+function announceRequest(params: {
+  requestId: string;
+  timestamp: string;
+  apiPath: string;
+  rawBody: string;
+  rawLogOffset: number | null;
+}): void {
+  try {
+    const request = parseAnthropicRequest(params.rawBody);
+    const model = typeof request.model === "string" ? request.model : null;
+    const requestKind = detectRequestKind(params.apiPath, request);
+    const lastUserPreview = extractLastUserPreview(request);
+
+    upsertRequest({
+      id: params.requestId,
+      timestamp: params.timestamp,
+      path: params.apiPath,
+      model,
+      totalTokens: null,
+      isMainConversation: requestKind.isMainConversation,
+      isTopLevel: requestKind.isTopLevel,
+      lastUserPreview,
+      rawLogOffset: params.rawLogOffset,
+    });
+
+    broadcastNewRequest({
+      requestId: params.requestId,
+      sessionId: getCurrentSessionId(),
+      totalTokens: 0,
+      model,
+      kind: requestKindForEvent(requestKind),
+      preview: lastUserPreview,
+      timestamp: Date.parse(params.timestamp),
+    });
+  } catch (err) {
+    console.error(`[proxy] Failed to announce request ${params.requestId}:`, err);
+    // Still broadcast so the sidebar shows something
+    broadcastNewRequest({
+      requestId: params.requestId,
+      sessionId: getCurrentSessionId(),
+      totalTokens: 0,
+      model: null,
+      kind: "aux",
+      preview: null,
+      timestamp: Date.parse(params.timestamp),
+    });
+  }
+}
+
 async function classifyAndStoreRequest(params: {
   requestId: string;
   timestamp: string;
@@ -78,24 +153,20 @@ async function classifyAndStoreRequest(params: {
   rawBody: string;
   headers: Record<string, string>;
   rawLogOffset: number | null;
+  responseBody?: string;
 }): Promise<void> {
   const request = parseAnthropicRequest(params.rawBody);
   const model = typeof request.model === "string" ? request.model : null;
   const requestKind = detectRequestKind(params.apiPath, request);
-
-  upsertRequest({
-    id: params.requestId,
-    timestamp: params.timestamp,
-    path: params.apiPath,
-    model,
-    totalTokens: null,
-    isMainConversation: requestKind.isMainConversation,
-    isTopLevel: requestKind.isTopLevel,
-    lastUserPreview: extractLastUserPreview(request),
-    rawLogOffset: params.rawLogOffset,
-  });
+  const lastUserPreview = extractLastUserPreview(request);
 
   let sections = classify(params.rawBody);
+
+  // Append assistant response sections if the response body is available
+  if (params.responseBody) {
+    const responseSections = parseResponseSections(params.responseBody);
+    sections = [...sections, ...responseSections];
+  }
 
   if (model) {
     try {
@@ -120,10 +191,17 @@ async function classifyAndStoreRequest(params: {
     totalTokens: totalTokens || null,
     isMainConversation: requestKind.isMainConversation,
     isTopLevel: requestKind.isTopLevel,
-    lastUserPreview: extractLastUserPreview(request),
+    lastUserPreview,
     rawLogOffset: params.rawLogOffset,
   });
   replaceRequestSections(params.requestId, sections);
+  broadcastRequestClassified({
+    requestId: params.requestId,
+    sections: sections.map((section) => ({
+      type: section.type,
+      tokenCount: section.tokenCount,
+    })),
+  });
 }
 
 function storeDuration(requestId: string, durationMs: number): void {
@@ -178,29 +256,39 @@ export async function handleRequest(
     payload: parsedBody,
   });
 
-  classifyAndStoreRequest({
+  // Classification happens after the full response is captured so we can
+  // include the assistant's reply sections. resolveResponseBody is called
+  // in the streaming/non-streaming paths below once we have the body.
+  let resolveResponseBody!: (body: string) => void;
+  const responseBodyPromise = new Promise<string>((res) => {
+    resolveResponseBody = res;
+  });
+
+  // Broadcast the new request immediately so the sidebar updates without
+  // waiting for the full response. Classification (which needs the response
+  // body to include assistant sections) runs after the stream ends.
+  announceRequest({
     requestId,
     timestamp: requestTimestamp,
     apiPath,
     rawBody,
-    headers,
     rawLogOffset,
-  }).catch((err) => {
-    console.error(`[classifier] Failed to classify ${requestId}:`, err);
-
-    const model = modelFromRequestBody(rawBody);
-    upsertRequest({
-      id: requestId,
-      timestamp: requestTimestamp,
-      path: apiPath,
-      model,
-      totalTokens: null,
-      isMainConversation: false,
-      isTopLevel: false,
-      lastUserPreview: null,
-      rawLogOffset,
-    });
   });
+
+  // Fire classification as a background task that waits for the response body.
+  void responseBodyPromise.then((responseBody) =>
+    classifyAndStoreRequest({
+      requestId,
+      timestamp: requestTimestamp,
+      apiPath,
+      rawBody,
+      headers,
+      rawLogOffset,
+      responseBody,
+    }).catch((err) => {
+      console.error(`[classifier] Failed to classify ${requestId}:`, err);
+    })
+  );
 
   // Forward to Anthropic.
   let response: Response;
@@ -245,6 +333,7 @@ export async function handleRequest(
       durationMs,
     });
     storeDuration(requestId, durationMs);
+    resolveResponseBody(responseBody);
 
     reply.status(response.status).headers(responseHeaders).send(responseBody);
     return;
@@ -309,5 +398,6 @@ export async function handleRequest(
       durationMs,
     });
     storeDuration(requestId, durationMs);
+    resolveResponseBody(fullResponse);
   }
 }

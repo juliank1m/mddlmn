@@ -23,6 +23,7 @@
 import Fastify from "fastify";
 import { registerApiRoutes } from "./api/routes.js";
 import { handleRequest } from "./proxy/handler.js";
+import { registerWebSocketManager } from "./ws/manager.js";
 
 const PORT = parseInt(process.env.MDDLMN_PORT ?? "8080", 10);
 
@@ -50,6 +51,7 @@ app.addContentTypeParser("*", { parseAs: "string" }, (_req, body, done) => {
 
 async function start(): Promise<void> {
   try {
+    await registerWebSocketManager(app);
     await registerApiRoutes(app);
 
     // Catch-all route: every non-API request to any path gets proxied.
