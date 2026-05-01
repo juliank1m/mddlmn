@@ -77,29 +77,29 @@ export function TokensTab() {
   const max = Math.max(1, ...breakdown.map(([, v]) => v));
 
   return (
-    <div className="p-6 max-w-5xl">
-      <header className="mb-6">
-        <div className="text-[10px] uppercase tracking-widest2 text-bone-400 mb-1">
+    <div className="p-4 max-w-5xl">
+      <header className="mb-3">
+        <div className="text-[9px] uppercase tracking-widest2 text-bone-400 mb-1">
           tokens · breakdown + session trend
         </div>
         <div className="dash-divider" />
       </header>
 
-      <section className="mb-10">
-        <div className="flex items-baseline gap-3 mb-4">
-          <span className="font-display italic text-2xl text-bone-100">
+      <section className="mb-6">
+        <div className="flex items-baseline gap-2 mb-3">
+          <span className="font-display italic text-xl text-bone-100">
             {formatTokens(totalRequest)}
           </span>
-          <span className="text-[10px] uppercase tracking-widest2 text-bone-400">
+          <span className="text-[9px] uppercase tracking-widest2 text-bone-400">
             tokens · current request
           </span>
         </div>
 
         <StackedBar breakdown={breakdown} total={totalRequest} />
 
-        <div className="mt-6 space-y-3">
+        <div className="mt-3 space-y-1.5">
           {breakdown.map(([type, value], i) => (
-            <div key={type} className="grid grid-cols-[max-content_1fr_max-content] gap-3 items-center">
+            <div key={type} className="grid grid-cols-[max-content_1fr_max-content] gap-2 items-center">
               <SectionTypeBadge type={type} />
               <TokenBar
                 value={value}
@@ -107,9 +107,9 @@ export function TokensTab() {
                 tone={TYPE_TONES[type]}
                 index={i}
               />
-              <span className="text-xs tabular-nums text-bone-200 w-20 text-right">
+              <span className="text-[10px] tabular-nums text-bone-200 w-16 text-right">
                 {formatTokens(value)}
-                <span className="text-bone-400 text-[10px] ml-1">
+                <span className="text-bone-400 text-[9px] ml-1">
                   {((value / totalRequest) * 100).toFixed(1)}%
                 </span>
               </span>
@@ -119,7 +119,7 @@ export function TokensTab() {
       </section>
 
       <section>
-        <div className="text-[10px] uppercase tracking-widest2 text-bone-400 mb-3">
+        <div className="text-[9px] uppercase tracking-widest2 text-bone-400 mb-2">
           session context growth
         </div>
         {stats && stats.length > 0 ? (

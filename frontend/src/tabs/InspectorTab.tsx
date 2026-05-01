@@ -21,15 +21,15 @@ export function InspectorTab() {
   const max = Math.max(1, ...sections.map((s) => s.tokenCount ?? 0));
 
   return (
-    <div className="p-6 max-w-5xl">
-      <header className="mb-6">
-        <div className="text-[10px] uppercase tracking-widest2 text-bone-400 mb-1">
+    <div className="p-3 max-w-5xl">
+      <header className="mb-2">
+        <div className="text-[9px] uppercase tracking-widest2 text-bone-400 mb-1">
           inspector / {sections.length} sections
         </div>
         <div className="dash-divider" />
       </header>
 
-      <div className="space-y-2">
+      <div className="space-y-px">
         {sections.map((section, i) => (
           <SectionRow key={section.id} section={section} max={max} index={i} />
         ))}
@@ -54,18 +54,18 @@ function SectionRow({
   return (
     <Collapsible
       header={
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="text-bone-400 text-[10px] tabular-nums w-6 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-bone-400 text-[9px] tabular-nums w-5 shrink-0">
             {String(index + 1).padStart(2, "0")}
           </span>
           <SectionTypeBadge type={section.type} />
-          <span className="text-bone-200 text-sm truncate min-w-0 flex-1">
+          <span className="text-bone-200 text-xs truncate min-w-0 flex-1">
             {section.label ?? "—"}
           </span>
-          <span className="text-bone-400 text-[10px] tabular-nums shrink-0">
+          <span className="text-bone-400/60 text-[9px] tabular-nums shrink-0 hidden lg:block">
             {shortHash(section.contentHash)}
           </span>
-          <span className="text-bone-100 text-xs tabular-nums shrink-0 w-16 text-right">
+          <span className="text-bone-100 text-[10px] tabular-nums shrink-0 w-12 text-right">
             {formatTokens(tokenCount)}
           </span>
         </div>

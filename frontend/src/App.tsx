@@ -29,6 +29,9 @@ const TABS: Array<{ key: TabKey; label: string; symbol: string }> = [
 
 export function App() {
   const status = useStore((s) => s.status);
+  const proxy = useStore((s) => s.proxy);
+  const startProxy = useStore((s) => s.startProxy);
+  const stopProxy = useStore((s) => s.stopProxy);
   const tab = useStore((s) => s.tab);
   const setTab = useStore((s) => s.setTab);
   const hydrate = useStore((s) => s.hydrate);
@@ -51,7 +54,13 @@ export function App() {
       <div className="absolute inset-0 bg-hairgrid pointer-events-none" />
 
       <div className="relative z-10 flex flex-col h-full">
-        <Header status={status} sessionLabel={activeSession?.id} />
+        <Header
+          status={status}
+          sessionLabel={activeSession?.id}
+          proxy={proxy}
+          onStart={startProxy}
+          onStop={stopProxy}
+        />
 
         <div className="grid grid-cols-[clamp(280px,26vw,360px)_1fr] flex-1 min-h-0 overflow-hidden">
           <RequestList />
@@ -74,31 +83,42 @@ export function App() {
           </main>
         </div>
 
-        <Footer />
       </div>
     </div>
   );
 }
 
-function Header({ status, sessionLabel }: { status: ReturnType<typeof useStore.getState>["status"]; sessionLabel?: string }) {
+function Header({
+  status,
+  sessionLabel,
+  proxy,
+  onStart,
+  onStop,
+}: {
+  status: ReturnType<typeof useStore.getState>["status"];
+  sessionLabel?: string;
+  proxy: ReturnType<typeof useStore.getState>["proxy"];
+  onStart: () => void;
+  onStop: () => void;
+}) {
   const logoSrc = window.__MDDLMN_ASSETS__?.logo ?? frontendLogo;
 
   return (
-    <header className="border-b border-bone-400/10 px-6 py-2.5 flex items-center gap-6 relative">
-      <div className="flex items-center gap-4">
-        <img src={logoSrc} alt="mddlmn" className="h-14 w-auto shrink-0" />
-        <span className="text-[10px] uppercase tracking-widest2 text-bone-400">
-          interceptor v0.1
+    <header className="border-b border-bone-400/10 px-3 py-1.5 flex items-center gap-3 relative">
+      <div className="flex items-center gap-2 shrink-0">
+        <img src={logoSrc} alt="mddlmn" className="h-7 w-auto shrink-0" />
+        <span className="text-[9px] uppercase tracking-widest2 text-bone-400 hidden sm:block">
+          v0.1
         </span>
       </div>
 
-      <div className="hidden md:block h-6 w-px bg-bone-400/15" />
+      <div className="h-4 w-px bg-bone-400/15 shrink-0" />
 
-      <div className="hidden md:flex items-center gap-4 text-[10px] uppercase tracking-widest2">
-        <span className="text-bone-400">session</span>
-        <code className="text-signal">
+      <div className="flex items-center gap-2 text-[9px] uppercase tracking-widest2 min-w-0 overflow-hidden">
+        <span className="text-bone-400 shrink-0">sess</span>
+        <code className="text-signal truncate">
           <TextScramble
-            text={sessionLabel ? sessionLabel.slice(0, 12) : "—"}
+            text={sessionLabel ? sessionLabel.split("T")[0] : "—"}
             trigger={sessionLabel ?? "none"}
             duration={500}
           />
@@ -106,6 +126,31 @@ function Header({ status, sessionLabel }: { status: ReturnType<typeof useStore.g
       </div>
 
       <div className="flex-1" />
+
+      <div className="flex items-center gap-2 text-[9px] uppercase tracking-widest2 shrink-0">
+        {proxy.running ? (
+          <>
+            <code className="text-signal tabular-nums hidden lg:block text-[9px]">
+              :{proxy.baseUrl?.split(":").pop()}
+            </code>
+            <button
+              type="button"
+              onClick={onStop}
+              className="border border-bone-400/20 px-2 py-1 text-bone-300 hover:border-signal/60 hover:text-signal transition-colors"
+            >
+              stop
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={onStart}
+            className="border border-signal/50 bg-signal/10 px-2 py-1 text-signal hover:bg-signal/20 transition-colors"
+          >
+            start proxy
+          </button>
+        )}
+      </div>
 
       <StatusDot status={status} />
     </header>
@@ -122,7 +167,7 @@ function TabBar({
   totalTokens: number;
 }) {
   return (
-    <div className="border-b border-bone-400/10 px-4 py-2.5 flex items-center gap-1 bg-ink-900/40">
+    <div className="border-b border-bone-400/10 px-3 py-1.5 flex items-center gap-0.5 bg-ink-900/40">
       {TABS.map((t) => {
         const active = tab === t.key;
         return (
@@ -131,8 +176,8 @@ function TabBar({
             type="button"
             onClick={() => setTab(t.key)}
             className={clsx(
-              "relative px-3.5 py-1.5 flex items-baseline gap-2 transition-colors",
-              "text-[11px] uppercase tracking-widest2",
+              "relative px-2.5 py-1 flex items-baseline gap-1.5 transition-colors",
+              "text-[10px] uppercase tracking-widest2",
               active
                 ? "text-bone-50"
                 : "text-bone-400 hover:text-bone-200"
@@ -150,7 +195,7 @@ function TabBar({
             {active && (
               <motion.span
                 layoutId="tab-underline"
-                className="absolute left-0 right-0 -bottom-[10px] h-px bg-signal"
+                className="absolute left-0 right-0 -bottom-[6px] h-px bg-signal"
                 transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
               />
             )}
@@ -160,25 +205,11 @@ function TabBar({
 
       <div className="flex-1" />
 
-      <div className="flex items-baseline gap-2 text-[10px] uppercase tracking-widest2 text-bone-400">
-        <span>session</span>
-        <span className="text-bone-100 tabular-nums">{formatTokens(totalTokens)}</span>
-        <span>tokens captured</span>
+      <div className="flex items-baseline gap-1.5 text-[9px] uppercase tracking-widest2 text-bone-400">
+        <span className="text-bone-200 tabular-nums">{formatTokens(totalTokens)}</span>
+        <span>tok</span>
       </div>
     </div>
   );
 }
 
-function Footer() {
-  return (
-    <footer className="border-t border-bone-400/10 px-6 py-2 flex items-center gap-4 text-[10px] uppercase tracking-widest2 text-bone-400">
-      <span>◜ wiretap active</span>
-      <div className="dash-divider flex-1 max-w-md" />
-      <span>JSONL · SQLite</span>
-      <span className="text-bone-400/40">/</span>
-      <span>fastify · ws</span>
-      <span className="text-bone-400/40">/</span>
-      <span>react · zustand</span>
-    </footer>
-  );
-}

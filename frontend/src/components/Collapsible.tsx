@@ -30,7 +30,7 @@ export function Collapsible({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full text-left px-3 py-2.5 flex items-center gap-3 hover:bg-bone-50/[0.02] transition-colors"
+        className="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bone-50/[0.02] transition-colors"
       >
         <span
           className={clsx(

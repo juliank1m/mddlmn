@@ -4,9 +4,17 @@ export interface Bridge {
   fetch<T>(endpoint: string): Promise<T>;
   onEvent(handler: (event: WSEvent) => void): () => void;
   onStatus(handler: (status: BridgeStatus) => void): () => void;
+  onProxyState(handler: (state: ProxyState) => void): () => void;
+  startProxy(): void;
+  stopProxy(): void;
 }
 
 export type BridgeStatus = "connecting" | "open" | "closed" | "error";
+export type ProxyState = {
+  port?: number;
+  baseUrl: string | null;
+  running: boolean;
+};
 
 type VsCodeApi = {
   postMessage(message: unknown): void;
@@ -26,6 +34,7 @@ export const bridge: Bridge = inWebview ? createWebviewBridge() : createBrowserB
 function createBrowserBridge(): Bridge {
   const eventHandlers = new Set<(event: WSEvent) => void>();
   const statusHandlers = new Set<(status: BridgeStatus) => void>();
+  const proxyStateHandlers = new Set<(state: ProxyState) => void>();
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -79,6 +88,17 @@ function createBrowserBridge(): Bridge {
       statusHandlers.add(handler);
       return () => statusHandlers.delete(handler);
     },
+    onProxyState(handler) {
+      proxyStateHandlers.add(handler);
+      handler({ baseUrl: `${location.protocol}//${location.host}`, running: true });
+      return () => proxyStateHandlers.delete(handler);
+    },
+    startProxy() {
+      connect();
+    },
+    stopProxy() {
+      socket?.close();
+    },
   };
 }
 
@@ -86,6 +106,7 @@ function createWebviewBridge(): Bridge {
   const vscode = window.acquireVsCodeApi!();
   const eventHandlers = new Set<(event: WSEvent) => void>();
   const statusHandlers = new Set<(status: BridgeStatus) => void>();
+  const proxyStateHandlers = new Set<(state: ProxyState) => void>();
   const pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
   window.addEventListener("message", (msg) => {
@@ -94,7 +115,8 @@ function createWebviewBridge(): Bridge {
       | { type: "fetch:error"; id: string; error: string }
       | { type: "ws:event"; event: WSEvent }
       | { type: "ws:status"; status: "open" | "closed" }
-      | { type: "ws:error"; error: string };
+      | { type: "ws:error"; error: string }
+      | { type: "state"; proxy: ProxyState };
 
     if (!data || typeof data !== "object") return;
 
@@ -123,11 +145,18 @@ function createWebviewBridge(): Bridge {
       case "ws:error":
         for (const handler of statusHandlers) handler("error");
         return;
+      case "state":
+        for (const handler of proxyStateHandlers) handler(data.proxy);
+        if (data.proxy.running) {
+          vscode.postMessage({ type: "ws:connect" });
+        } else {
+          for (const handler of statusHandlers) handler("closed");
+        }
+        return;
     }
   });
 
   vscode.postMessage({ type: "ready" });
-  vscode.postMessage({ type: "ws:connect" });
 
   return {
     fetch<T>(endpoint: string): Promise<T> {
@@ -147,6 +176,17 @@ function createWebviewBridge(): Bridge {
     onStatus(handler) {
       statusHandlers.add(handler);
       return () => statusHandlers.delete(handler);
+    },
+    onProxyState(handler) {
+      proxyStateHandlers.add(handler);
+      return () => proxyStateHandlers.delete(handler);
+    },
+    startProxy() {
+      vscode.postMessage({ type: "proxy:start" });
+      for (const handler of statusHandlers) handler("connecting");
+    },
+    stopProxy() {
+      vscode.postMessage({ type: "proxy:stop" });
     },
   };
 }

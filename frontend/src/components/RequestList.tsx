@@ -38,17 +38,17 @@ export function RequestList() {
 
   return (
     <div className="flex flex-col min-h-0 h-full border-r border-bone-400/10 bg-ink-900/60 overflow-hidden">
-      <div className="px-4 pt-4 pb-3 border-b border-bone-400/10">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-[10px] uppercase tracking-widest2 text-bone-400">
+      <div className="px-3 pt-2 pb-2 border-b border-bone-400/10">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[9px] uppercase tracking-widest2 text-bone-400">
             Intercepts · {filtered.length}
           </span>
-          <span className="text-[10px] uppercase tracking-widest2 text-bone-400 tabular-nums">
+          <span className="text-[9px] uppercase tracking-widest2 text-bone-400 tabular-nums">
             ∑ {formatTokens(filtered.reduce((acc, r) => acc + (r.totalTokens ?? 0), 0))}
           </span>
         </div>
 
-        <div className="flex gap-1 text-[10px]">
+        <div className="flex gap-1 text-[9px]">
           <FilterToggle
             active={!showAux}
             label="MAIN"
@@ -152,7 +152,7 @@ function RequestRow({
       type="button"
       onClick={onClick}
       className={clsx(
-        "w-full text-left px-4 py-3 border-b border-bone-400/5 relative transition-colors",
+        "w-full text-left px-3 py-2 border-b border-bone-400/5 relative transition-colors",
         "hover:bg-bone-50/[0.02]",
         isSelected && "bg-signal/[0.04]"
       )}
@@ -161,21 +161,21 @@ function RequestRow({
         <span className="absolute left-0 inset-y-0 w-px bg-signal" aria-hidden />
       )}
 
-      <div className="flex items-center gap-2 mb-1.5">
-        <span className="text-[10px] text-bone-400 tabular-nums">
+      <div className="flex items-center gap-1.5 mb-1">
+        <span className="text-[9px] text-bone-400 tabular-nums">
           {String(index + 1).padStart(3, "0")}
         </span>
-        <span className={clsx("h-1 w-1 rounded-full", tone.dot)} aria-hidden />
-        <span className="text-[10px] text-bone-300 tabular-nums">
+        <span className={clsx("h-1 w-1 rounded-full shrink-0", tone.dot)} aria-hidden />
+        <span className="text-[9px] text-bone-300 tabular-nums">
           {formatTime(request.timestamp)}
         </span>
-        <span className="text-[10px] text-bone-400 tabular-nums">
+        <span className="text-[9px] text-bone-400 tabular-nums">
           {relativeTimestamp(sessionStart, request.timestamp)}
         </span>
         <div className="flex-1" />
         <span
           className={clsx(
-            "text-[9px] uppercase tracking-widest2 px-1.5 py-0.5 border rounded-sm",
+            "text-[9px] uppercase tracking-widest2 px-1 py-0.5 border rounded-sm",
             tone.tag
           )}
         >
@@ -185,7 +185,7 @@ function RequestRow({
 
       <div
         className={clsx(
-          "text-sm leading-snug truncate",
+          "text-xs leading-snug truncate",
           isSelected ? "text-bone-50" : "text-bone-100"
         )}
       >
@@ -196,13 +196,13 @@ function RequestRow({
         )}
       </div>
 
-      <div className="flex items-center gap-3 mt-1.5 text-[10px] text-bone-400 tabular-nums">
+      <div className="flex items-center gap-2 mt-0.5 text-[9px] text-bone-400 tabular-nums">
         <span>
           <span className="text-bone-300">{formatTokens(request.totalTokens)}</span>{" "}
-          tokens
+          tok
         </span>
         <span className="text-bone-400/40">·</span>
-        <span className="truncate">{request.model ?? "—"}</span>
+        <span className="truncate">{request.model?.replace("claude-", "") ?? "—"}</span>
       </div>
     </button>
   );
