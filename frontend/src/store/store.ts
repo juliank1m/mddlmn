@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { bridge, type BridgeStatus } from "../lib/bridge";
+import { bridge, type BridgeStatus, type ProxyState } from "../lib/bridge";
 import type {
   RequestRecord,
   SectionRecord,
@@ -11,6 +11,7 @@ export type TabKey = "inspector" | "diff" | "timeline" | "tokens";
 
 interface State {
   status: BridgeStatus;
+  proxy: ProxyState;
   sessions: SessionRecord[];
   activeSessionId: string | null;
   requests: RequestRecord[];
@@ -25,6 +26,8 @@ interface State {
 
 interface Actions {
   hydrate(): Promise<void>;
+  startProxy(): void;
+  stopProxy(): void;
   selectSession(id: string): Promise<void>;
   selectRequest(id: string): void;
   setTab(tab: TabKey): void;
@@ -36,7 +39,8 @@ interface Actions {
 }
 
 export const useStore = create<State & Actions>((set, get) => ({
-  status: "connecting",
+  status: "closed",
+  proxy: { baseUrl: null, running: false },
   sessions: [],
   activeSessionId: null,
   requests: [],
@@ -49,6 +53,10 @@ export const useStore = create<State & Actions>((set, get) => ({
   diffPairOverride: null,
 
   async hydrate() {
+    if (!get().proxy.running) {
+      return;
+    }
+
     try {
       const { sessions } = await bridge.fetch<{ sessions: SessionRecord[] }>(
         "/api/sessions"
@@ -61,6 +69,14 @@ export const useStore = create<State & Actions>((set, get) => ({
     } catch {
       // network error — leave empty
     }
+  },
+
+  startProxy() {
+    bridge.startProxy();
+  },
+
+  stopProxy() {
+    bridge.stopProxy();
   },
 
   async selectSession(id) {
@@ -131,6 +147,13 @@ export function initBridge(): void {
 
   bridge.onStatus((status) => useStore.setState({ status }));
 
+  bridge.onProxyState((proxy) => {
+    useStore.setState({ proxy });
+    if (proxy.running) {
+      void useStore.getState().hydrate();
+    }
+  });
+
   bridge.onEvent(async (event: WSEvent) => {
     const state = useStore.getState();
 
@@ -178,6 +201,19 @@ export function initBridge(): void {
         delete next[event.requestId];
         return { sectionsCache: next };
       });
+
+      // Re-fetch the request record to pick up updated totalTokens
+      try {
+        const { request } = await bridge.fetch<{ request: RequestRecord }>(
+          `/api/requests/${event.requestId}`
+        );
+        useStore.setState((s) => ({
+          requests: s.requests.map((r) => r.id === request.id ? request : r),
+        }));
+      } catch {
+        // ignore
+      }
+
       const sel = useStore.getState().selectedRequestId;
       if (sel === event.requestId) {
         void useStore.getState().loadSections(event.requestId);
