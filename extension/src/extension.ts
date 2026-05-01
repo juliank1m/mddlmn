@@ -7,6 +7,8 @@ import type { WebSocket as WebSocketType } from "ws";
 
 type WebviewMessage =
   | { type: "ready" }
+  | { type: "proxy:start" }
+  | { type: "proxy:stop" }
   | {
       type: "fetch";
       id: string;
@@ -25,20 +27,17 @@ let proxyPort: number | undefined;
 let panel: vscode.WebviewPanel | undefined;
 let upstreamSocket: WebSocketType | undefined;
 let output: vscode.OutputChannel;
+let statusBar: vscode.StatusBarItem;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   output = vscode.window.createOutputChannel("mddlmn");
   context.subscriptions.push(output);
 
-  proxyPort = await findAvailablePort();
-  startProxy(context, proxyPort);
-  injectAnthropicBaseUrl(context, proxyPort);
+  await clearAnthropicBaseUrl(context);
 
   // Status bar item shows the proxy URL at a glance and lets the user copy it.
-  const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-  statusBar.text = `$(radio-tower) mddlmn :${proxyPort}`;
-  statusBar.tooltip = `mddlmn proxy running on http://localhost:${proxyPort}\nClick to copy ANTHROPIC_BASE_URL export command`;
-  statusBar.command = "mddlmn.copyBaseUrl";
+  statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  updateStatusBar();
   statusBar.show();
   context.subscriptions.push(statusBar);
 
@@ -66,32 +65,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     })
   );
 
-  // Notify the user that existing terminals need to be restarted.
-  vscode.window.showInformationMessage(
-    `mddlmn proxy started on port ${proxyPort}. Open a new terminal — ANTHROPIC_BASE_URL is set automatically.`,
-    "Open Terminal",
-    "Open Panel"
-  ).then((choice) => {
-    if (choice === "Open Terminal") {
-      const terminal = vscode.window.createTerminal("mddlmn");
-      terminal.sendText(`export ANTHROPIC_BASE_URL=http://localhost:${proxyPort}`);
-      terminal.show();
-    } else if (choice === "Open Panel") {
-      openPanel(context);
-    }
-  });
-
   context.subscriptions.push({
     dispose: () => {
       closeUpstreamSocket();
-      stopProxy();
+      void stopProxy(context);
     },
   });
 }
 
 export function deactivate(): void {
   closeUpstreamSocket();
-  stopProxy();
+  if (proxyProcess) {
+    proxyProcess.kill();
+    proxyProcess = undefined;
+  }
 }
 
 async function findAvailablePort(): Promise<number> {
@@ -110,6 +97,17 @@ async function findAvailablePort(): Promise<number> {
       server.close(() => resolve(port));
     });
   });
+}
+
+async function ensureProxyStarted(context: vscode.ExtensionContext): Promise<void> {
+  if (proxyProcess && proxyPort) {
+    postPanelState();
+    return;
+  }
+
+  proxyPort = await findAvailablePort();
+  startProxy(context, proxyPort);
+  await configureAnthropicBaseUrl(context, proxyPort);
 }
 
 function startProxy(context: vscode.ExtensionContext, port: number): void {
@@ -132,6 +130,7 @@ function startProxy(context: vscode.ExtensionContext, port: number): void {
   });
 
   output.appendLine(`[extension] Starting proxy on port ${port}`);
+  updateStatusBar();
 
   proxyProcess.stdout.on("data", (chunk: Buffer) => {
     output.append(chunk.toString());
@@ -145,54 +144,154 @@ function startProxy(context: vscode.ExtensionContext, port: number): void {
     output.appendLine(`[extension] Failed to start proxy: ${err.message}`);
     vscode.window.showErrorMessage(`mddlmn proxy failed to start: ${err.message}`);
     proxyProcess = undefined;
+    proxyPort = undefined;
+    void clearAnthropicBaseUrl(context);
     postPanelState();
+    updateStatusBar();
   });
 
   proxyProcess.on("exit", (code, signal) => {
     output.appendLine(`[extension] Proxy exited code=${code ?? "null"} signal=${signal ?? "null"}`);
     proxyProcess = undefined;
+    proxyPort = undefined;
+    closeUpstreamSocket();
+    void clearAnthropicBaseUrl(context);
     postPanelState();
+    updateStatusBar();
   });
 
   postPanelState();
 }
 
 function resolveProxyRoot(context: vscode.ExtensionContext): string {
-  const candidates = [
-    path.resolve(context.extensionPath, ".."),
-    context.extensionPath,
-    ...(vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath),
-  ];
-
-  for (const candidate of candidates) {
-    if (
-      fileExists(path.join(candidate, "package.json")) &&
-      (fileExists(path.join(candidate, "dist", "index.js")) ||
-        fileExists(path.join(candidate, "src", "index.ts")))
-    ) {
-      return candidate;
-    }
-  }
-
-  return path.resolve(context.extensionPath, "..");
+  return path.join(context.extensionPath, "proxy-dist");
 }
 
-function stopProxy(): void {
+async function stopProxy(context: vscode.ExtensionContext): Promise<void> {
   if (!proxyProcess) {
+    proxyPort = undefined;
+    closeUpstreamSocket();
+    await clearAnthropicBaseUrl(context);
+    postPanelState();
     return;
   }
 
   proxyProcess.kill();
   proxyProcess = undefined;
+  proxyPort = undefined;
+  closeUpstreamSocket();
+  await clearAnthropicBaseUrl(context);
+  postPanelState();
+  updateStatusBar();
 }
 
-function injectAnthropicBaseUrl(context: vscode.ExtensionContext, port: number): void {
+async function configureAnthropicBaseUrl(
+  context: vscode.ExtensionContext,
+  port: number
+): Promise<void> {
   const baseUrl = `http://localhost:${port}`;
+  process.env.ANTHROPIC_BASE_URL = baseUrl;
+
+  injectTerminalAnthropicBaseUrl(context, baseUrl);
+  await injectClaudeCodeAnthropicBaseUrl(baseUrl);
+
+  output.appendLine(`[extension] Configured ANTHROPIC_BASE_URL=${baseUrl}`);
+}
+
+async function clearAnthropicBaseUrl(context: vscode.ExtensionContext): Promise<void> {
+  delete process.env.ANTHROPIC_BASE_URL;
+  context.environmentVariableCollection.delete("ANTHROPIC_BASE_URL");
+  await removeClaudeCodeAnthropicBaseUrl();
+  output.appendLine("[extension] Cleared ANTHROPIC_BASE_URL");
+}
+
+function injectTerminalAnthropicBaseUrl(
+  context: vscode.ExtensionContext,
+  baseUrl: string
+): void {
   const collection = context.environmentVariableCollection;
   collection.replace("ANTHROPIC_BASE_URL", baseUrl);
   collection.description = "Routes Anthropic API traffic through the local mddlmn proxy.";
 
-  output.appendLine(`[extension] Injected ANTHROPIC_BASE_URL=${baseUrl}`);
+  output.appendLine(`[extension] Injected terminal ANTHROPIC_BASE_URL=${baseUrl}`);
+}
+
+async function injectClaudeCodeAnthropicBaseUrl(baseUrl: string): Promise<void> {
+  const config = vscode.workspace.getConfiguration("claudeCode");
+  const existing = normalizeClaudeCodeEnvironmentVariables(
+    config.get("environmentVariables")
+  );
+  const next = upsertEnvironmentVariable(existing, "ANTHROPIC_BASE_URL", baseUrl);
+
+  try {
+    await config.update(
+      "environmentVariables",
+      next,
+      vscode.workspace.workspaceFolders?.length
+        ? vscode.ConfigurationTarget.Workspace
+        : vscode.ConfigurationTarget.Global
+    );
+    output.appendLine(`[extension] Injected Claude Code ANTHROPIC_BASE_URL=${baseUrl}`);
+  } catch (err) {
+    output.appendLine(
+      `[extension] Failed to update claudeCode.environmentVariables: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+  }
+}
+
+async function removeClaudeCodeAnthropicBaseUrl(): Promise<void> {
+  const config = vscode.workspace.getConfiguration("claudeCode");
+  const existing = normalizeClaudeCodeEnvironmentVariables(
+    config.get("environmentVariables")
+  );
+  const next = existing.filter((entry) => entry.name !== "ANTHROPIC_BASE_URL");
+
+  try {
+    await config.update(
+      "environmentVariables",
+      next.length ? next : undefined,
+      vscode.workspace.workspaceFolders?.length
+        ? vscode.ConfigurationTarget.Workspace
+        : vscode.ConfigurationTarget.Global
+    );
+    output.appendLine("[extension] Removed Claude Code ANTHROPIC_BASE_URL");
+  } catch (err) {
+    output.appendLine(
+      `[extension] Failed to remove claudeCode.environmentVariables: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+  }
+}
+
+function normalizeClaudeCodeEnvironmentVariables(
+  value: unknown
+): Array<{ name: string; value: string }> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((entry): entry is { name: unknown; value?: unknown } => {
+      return typeof entry === "object" && entry !== null && "name" in entry;
+    })
+    .map((entry) => ({
+      name: String(entry.name),
+      value: entry.value === undefined || entry.value === null ? "" : String(entry.value),
+    }))
+    .filter((entry) => entry.name.length > 0);
+}
+
+function upsertEnvironmentVariable(
+  entries: Array<{ name: string; value: string }>,
+  name: string,
+  value: string
+): Array<{ name: string; value: string }> {
+  const next = entries.filter((entry) => entry.name !== name);
+  next.push({ name, value });
+  return next;
 }
 
 function openPanel(context: vscode.ExtensionContext): void {
@@ -216,7 +315,7 @@ function openPanel(context: vscode.ExtensionContext): void {
 
   panel.webview.html = getWebviewHtml(panel.webview, context.extensionPath);
   panel.webview.onDidReceiveMessage((message: WebviewMessage) => {
-    void handleWebviewMessage(message);
+    void handleWebviewMessage(context, message);
   });
 
   panel.onDidDispose(() => {
@@ -225,8 +324,11 @@ function openPanel(context: vscode.ExtensionContext): void {
   });
 }
 
-async function handleWebviewMessage(message: WebviewMessage): Promise<void> {
-  if (!panel || !proxyPort) {
+async function handleWebviewMessage(
+  context: vscode.ExtensionContext,
+  message: WebviewMessage
+): Promise<void> {
+  if (!panel) {
     return;
   }
 
@@ -235,11 +337,31 @@ async function handleWebviewMessage(message: WebviewMessage): Promise<void> {
       postPanelState();
       return;
 
+    case "proxy:start":
+      await ensureProxyStarted(context);
+      return;
+
+    case "proxy:stop":
+      await stopProxy(context);
+      return;
+
     case "fetch":
+      if (!proxyPort) {
+        await panel.webview.postMessage({
+          type: "fetch:error",
+          id: message.id,
+          error: "mddlmn proxy is stopped",
+        });
+        return;
+      }
       await relayFetch(message);
       return;
 
     case "ws:connect":
+      if (!proxyPort) {
+        void panel?.webview.postMessage({ type: "ws:status", status: "closed" });
+        return;
+      }
       await connectUpstreamSocket(proxyPort);
       return;
 
@@ -288,34 +410,53 @@ async function connectUpstreamSocket(port: number): Promise<void> {
   }
 
   const { WebSocket } = await import("ws");
-  upstreamSocket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
 
-  upstreamSocket.on("open", () => {
-    void panel?.webview.postMessage({ type: "ws:status", status: "open" });
-  });
-
-  upstreamSocket.on("message", (data) => {
-    let event: unknown = data.toString();
-    try {
-      event = JSON.parse(data.toString());
-    } catch {
-      // Leave non-JSON payloads as strings.
+  const attempt = (retriesLeft: number): void => {
+    if (!panel || upstreamSocket) {
+      return;
     }
 
-    void panel?.webview.postMessage({ type: "ws:event", event });
-  });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
 
-  upstreamSocket.on("close", () => {
-    upstreamSocket = undefined;
-    void panel?.webview.postMessage({ type: "ws:status", status: "closed" });
-  });
-
-  upstreamSocket.on("error", (err) => {
-    void panel?.webview.postMessage({
-      type: "ws:error",
-      error: err instanceof Error ? err.message : String(err),
+    ws.on("open", () => {
+      output.appendLine(`[extension] Upstream WebSocket connected to ws://127.0.0.1:${port}/ws`);
+      upstreamSocket = ws;
+      void panel?.webview.postMessage({ type: "ws:status", status: "open" });
     });
-  });
+
+    ws.on("message", (data) => {
+      let event: unknown = data.toString();
+      try {
+        event = JSON.parse(data.toString());
+      } catch {
+        // Leave non-JSON payloads as strings.
+      }
+
+      void panel?.webview.postMessage({ type: "ws:event", event });
+    });
+
+    ws.on("close", () => {
+      output.appendLine("[extension] Upstream WebSocket closed");
+      upstreamSocket = undefined;
+      void panel?.webview.postMessage({ type: "ws:status", status: "closed" });
+    });
+
+    ws.on("error", (err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      ws.terminate();
+
+      if (retriesLeft > 0) {
+        output.appendLine(`[extension] WebSocket connection failed, retrying... (${retriesLeft} left)`);
+        setTimeout(() => attempt(retriesLeft - 1), 500);
+      } else {
+        output.appendLine(`[extension] Upstream WebSocket error: ${message}`);
+        upstreamSocket = undefined;
+        void panel?.webview.postMessage({ type: "ws:error", error: message });
+      }
+    });
+  };
+
+  attempt(10);
 }
 
 function closeUpstreamSocket(): void {
@@ -346,6 +487,22 @@ function postPanelState(): void {
       running: Boolean(proxyProcess),
     },
   });
+}
+
+function updateStatusBar(): void {
+  if (!statusBar) {
+    return;
+  }
+
+  if (proxyPort && proxyProcess) {
+    statusBar.text = `$(radio-tower) mddlmn :${proxyPort}`;
+    statusBar.tooltip = `mddlmn proxy running on http://localhost:${proxyPort}`;
+    statusBar.command = "mddlmn.openPanel";
+  } else {
+    statusBar.text = "$(radio-tower) mddlmn idle";
+    statusBar.tooltip = "mddlmn proxy is stopped. Open the panel to start it.";
+    statusBar.command = "mddlmn.openPanel";
+  }
 }
 
 function getWebviewHtml(webview: vscode.Webview, extensionPath: string): string {

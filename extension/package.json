@@ -26,7 +26,8 @@
   "scripts": {
     "build": "tsc -p .",
     "watch": "tsc -watch -p .",
-    "package": "vsce package"
+    "build:proxy": "cd .. && npm run build && cd extension && node scripts/copy-proxy.mjs",
+    "package": "npm run build && npm run build:proxy && vsce package --allow-missing-repository"
   },
   "dependencies": {
     "ws": "^8.20.0"
