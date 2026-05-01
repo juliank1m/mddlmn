@@ -3,6 +3,7 @@
 This is the VS Code shell for mddlmn. On activation it:
 
 - starts the local proxy server on an available port
+- injects `ANTHROPIC_BASE_URL` into Claude Code's `claudeCode.environmentVariables`
 - injects `ANTHROPIC_BASE_URL` into integrated terminals
 - shows the active proxy port in the status bar
 - opens the React inspector in a webview panel

@@ -5,3 +5,14 @@ data/
 node_modules/
 .env
 PROJECT_SPEC.md
+*.vsix
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+
+# Generated build artifacts
+extension/proxy-dist/
+extension/webview-dist/
