@@ -16,3 +16,5 @@ PROJECT_SPEC.md
 # Generated build artifacts
 extension/proxy-dist/
 extension/webview-dist/
+
+docs/
