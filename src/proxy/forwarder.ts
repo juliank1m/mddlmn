@@ -64,10 +64,12 @@ export async function forward(
   // we're passing the original auth headers through (x-api-key or
   // Authorization), so Anthropic authenticates the request using
   // the user's own API key. We never touch or store the key.
+  const hasBody = method !== "GET" && method !== "HEAD";
+
   const response = await fetch(url, {
     method,
     headers: cleanHeaders,
-    body,
+    body: hasBody ? body || undefined : undefined,
     // @ts-ignore — Node 22's fetch doesn't have full type support for
     // duplex yet, but it's needed for streaming request bodies
   });

@@ -224,7 +224,7 @@ export async function handleRequest(
 
   // Read the raw request body. Fastify gives us the raw body as a string
   // because we'll configure it to use a plain text content type parser.
-  const rawBody = req.body as string;
+  const rawBody = (req.body as string | undefined) ?? "";
   const apiPath = req.url; // e.g. "/v1/messages"
   const method = req.method;
 

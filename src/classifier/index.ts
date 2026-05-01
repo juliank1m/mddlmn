@@ -67,7 +67,10 @@ function makeSection(type: SectionType, content: unknown, label?: string): Secti
   };
 }
 
-export function parseAnthropicRequest(rawRequestBody: string): AnthropicRequest {
+export function parseAnthropicRequest(rawRequestBody: string | undefined): AnthropicRequest {
+  if (!rawRequestBody) {
+    return {};
+  }
   const parsed = JSON.parse(rawRequestBody) as unknown;
   if (!isRecord(parsed)) {
     throw new Error("Expected request body to be a JSON object");
@@ -179,7 +182,7 @@ function metadataFromRequest(request: AnthropicRequest): Record<string, unknown>
   return metadata;
 }
 
-export function classify(rawRequestBody: string): Section[] {
+export function classify(rawRequestBody: string | undefined): Section[] {
   const request = parseAnthropicRequest(rawRequestBody);
   const sections: Section[] = [];
 
