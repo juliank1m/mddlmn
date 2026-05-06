@@ -1,0 +1,203 @@
+import { useEffect, useState } from "react";
+import { motion } from "motion/react";
+import { useStore } from "../store/store";
+import type { HeldRequest } from "../store/store";
+import type { AnthropicRequestBody } from "../lib/types";
+
+export function GateTab() {
+  const heldRequest = useStore((s) => s.heldRequest);
+  const gateEnabled = useStore((s) => s.gateEnabled);
+  const queueLength = useStore((s) => s.gateQueueLength);
+
+  if (!heldRequest) {
+    return <Empty gateEnabled={gateEnabled} queueLength={queueLength} />;
+  }
+
+  return <Held held={heldRequest} queueLength={queueLength} />;
+}
+
+function Empty({
+  gateEnabled,
+  queueLength,
+}: {
+  gateEnabled: boolean;
+  queueLength: number;
+}) {
+  return (
+    <div className="h-full flex items-center justify-center">
+      <div className="text-center max-w-sm px-6">
+        <div className="font-display italic text-3xl text-bone-200 mb-3">
+          {gateEnabled ? "armed. nothing held." : "gate is open."}
+        </div>
+        <div className="text-xs text-bone-400 leading-relaxed">
+          {gateEnabled
+            ? "the proxy is intercepting traffic. requests will appear here when held."
+            : "toggle the gate in the header to start intercepting requests before they reach the api."}
+        </div>
+        {queueLength > 1 && (
+          <div className="mt-6 text-[9px] uppercase tracking-widest2 text-bone-400">
+            queue depth · <span className="text-signal tabular-nums">{queueLength}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Held({ held, queueLength }: { held: HeldRequest; queueLength: number }) {
+  const approveHeld = useStore((s) => s.approveHeld);
+  const cancelHeld = useStore((s) => s.cancelHeld);
+  const elapsed = useElapsed(held.timestamp);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.18 }}
+      className="relative flex flex-col h-full min-h-0"
+    >
+      {/* leading-edge signal bar — visible reminder traffic is suspended */}
+      <div className="absolute top-0 bottom-0 left-0 w-[2px] bg-signal/80 shadow-[0_0_12px_rgba(252,211,77,0.4)]" />
+
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 pl-5">
+        <header className="mb-3">
+          <div className="flex items-baseline gap-2 mb-1">
+            <span className="text-[9px] uppercase tracking-widest2 text-signal">
+              ▌ holding
+            </span>
+            <span className="text-[9px] uppercase tracking-widest2 text-bone-400 tabular-nums">
+              {formatElapsed(elapsed)}
+            </span>
+            {queueLength > 1 && (
+              <>
+                <span className="text-bone-400/40">·</span>
+                <span className="text-[9px] uppercase tracking-widest2 text-bone-400">
+                  +{queueLength - 1} queued
+                </span>
+              </>
+            )}
+            <div className="flex-1" />
+            <code className="text-[9px] tabular-nums text-bone-400 truncate max-w-[40ch]">
+              {held.requestId.slice(0, 8)}
+            </code>
+          </div>
+          <div className="dash-divider" />
+        </header>
+
+        <BodyPreview body={held.body} />
+      </div>
+
+      {/* sticky decision bar */}
+      <div className="border-t border-bone-400/15 bg-ink-900/80 backdrop-blur-sm px-3 py-2 pl-5 flex items-center gap-2">
+        <span className="text-[9px] uppercase tracking-widest2 text-bone-400 hidden sm:block">
+          decision required
+        </span>
+        <div className="flex-1" />
+        <button
+          type="button"
+          onClick={() => void cancelHeld()}
+          className="border border-bone-400/30 px-3 py-1 text-[10px] uppercase tracking-widest2 text-bone-300 hover:border-red-400/60 hover:text-red-300 transition-colors"
+        >
+          abort
+        </button>
+        <button
+          type="button"
+          onClick={() => void approveHeld()}
+          className="border border-signal/60 bg-signal/15 px-3 py-1 text-[10px] uppercase tracking-widest2 text-signal hover:bg-signal/25 transition-colors"
+        >
+          release
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
+function BodyPreview({ body }: { body: AnthropicRequestBody }) {
+  const messages: unknown = body.messages;
+  const system: unknown = body.system;
+  const tools: unknown = body.tools;
+
+  const meta = Object.fromEntries(
+    Object.entries(body).filter(
+      ([k]) => k !== "messages" && k !== "system" && k !== "tools"
+    )
+  );
+
+  return (
+    <div className="space-y-3">
+      {Object.keys(meta).length > 0 && (
+        <Block label="metadata">
+          <pre className="code-block">{JSON.stringify(meta, null, 2)}</pre>
+        </Block>
+      )}
+      {system !== undefined && (
+        <Block label="system">
+          <pre className="code-block">
+            {typeof system === "string" ? system : JSON.stringify(system, null, 2)}
+          </pre>
+        </Block>
+      )}
+      {Array.isArray(tools) && tools.length > 0 && (
+        <Block label={`tools · ${tools.length}`}>
+          <pre className="code-block">{JSON.stringify(tools, null, 2)}</pre>
+        </Block>
+      )}
+      {Array.isArray(messages) && messages.length > 0 && (
+        <Block label={`messages · ${messages.length}`}>
+          <div className="space-y-2">
+            {messages.map((m, i) => (
+              <MessageRow key={i} index={i} message={m} />
+            ))}
+          </div>
+        </Block>
+      )}
+    </div>
+  );
+}
+
+function Block({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <div className="text-[9px] uppercase tracking-widest2 text-bone-400 mb-1">
+        {label}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function MessageRow({ index, message }: { index: number; message: unknown }) {
+  const role =
+    typeof message === "object" && message !== null && "role" in message
+      ? String((message as { role: unknown }).role)
+      : "?";
+  return (
+    <div className="border-l-2 border-bone-400/10 pl-2">
+      <div className="flex items-baseline gap-2 mb-1">
+        <span className="text-bone-400 text-[9px] tabular-nums">
+          {String(index + 1).padStart(2, "0")}
+        </span>
+        <span className="text-[9px] uppercase tracking-widest2 text-signal">{role}</span>
+      </div>
+      <pre className="code-block">{JSON.stringify(message, null, 2)}</pre>
+    </div>
+  );
+}
+
+function useElapsed(since: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return Math.max(0, now - since);
+}
+
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rs = s % 60;
+  return `${m}m${rs.toString().padStart(2, "0")}s`;
+}

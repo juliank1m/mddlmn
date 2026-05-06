@@ -1,7 +1,7 @@
 import websocket from "@fastify/websocket";
 import type { FastifyInstance } from "fastify";
 import { WebSocket } from "ws";
-import type { SectionType } from "../classifier/index.js";
+import type { AnthropicRequest, SectionType } from "../classifier/index.js";
 
 export type RequestKind = "top_level" | "tool_chain" | "aux";
 
@@ -27,7 +27,31 @@ export type RequestClassifiedEvent = {
   sections: SectionSummary[];
 };
 
-export type WSEvent = NewRequestEvent | RequestClassifiedEvent;
+export type RequestHeldEvent = {
+  type: "request_held";
+  requestId: string;
+  sessionId: string;
+  body: AnthropicRequest;
+  timestamp: number;
+};
+
+export type RequestReleasedEvent = {
+  type: "request_released";
+  requestId: string;
+};
+
+export type GateStatusEvent = {
+  type: "gate:status";
+  enabled: boolean;
+  queueLength: number;
+};
+
+export type WSEvent =
+  | NewRequestEvent
+  | RequestClassifiedEvent
+  | RequestHeldEvent
+  | RequestReleasedEvent
+  | GateStatusEvent;
 
 const clients = new Set<WebSocket>();
 
@@ -72,4 +96,18 @@ export function broadcastRequestClassified(
   event: Omit<RequestClassifiedEvent, "type">
 ): void {
   broadcast({ type: "request_classified", ...event });
+}
+
+export function broadcastRequestHeld(event: Omit<RequestHeldEvent, "type">): void {
+  broadcast({ type: "request_held", ...event });
+}
+
+export function broadcastRequestReleased(
+  event: Omit<RequestReleasedEvent, "type">
+): void {
+  broadcast({ type: "request_released", ...event });
+}
+
+export function broadcastGateStatus(event: Omit<GateStatusEvent, "type">): void {
+  broadcast({ type: "gate:status", ...event });
 }

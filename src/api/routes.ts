@@ -9,6 +9,13 @@ import {
   type SectionRecord,
 } from "../storage/db.js";
 import { readLogEntryAtOffset } from "../storage/logger.js";
+import {
+  approveHeld,
+  cancelHeld,
+  gate,
+  setGateEnabled,
+} from "../proxy/gate-singleton.js";
+import type { AnthropicRequest } from "../classifier/index.js";
 
 type IdParams = {
   id: string;
@@ -188,6 +195,52 @@ export async function registerApiRoutes(app: FastifyInstance): Promise<void> {
       diff: diffSections(sectionsA, sectionsB),
     };
   });
+
+  app.get("/api/gate/status", async () => {
+    return {
+      enabled: gate.isEnabled(),
+      queueLength: gate.queueLength(),
+      currentHeldId: gate.currentHeldId(),
+    };
+  });
+
+  app.post("/api/gate/enable", async () => {
+    setGateEnabled(true);
+    return { enabled: true };
+  });
+
+  app.post("/api/gate/disable", async () => {
+    setGateEnabled(false);
+    return { enabled: false };
+  });
+
+  app.post<{ Params: { requestId: string } }>(
+    "/api/gate/:requestId/approve",
+    async (request) => {
+      let editedBody: AnthropicRequest | undefined;
+      const raw = request.body;
+      if (typeof raw === "string" && raw.length > 0) {
+        try {
+          const parsed = JSON.parse(raw) as { body?: AnthropicRequest };
+          editedBody = parsed.body;
+        } catch {
+          // ignore — approve as-is
+        }
+      } else if (raw && typeof raw === "object") {
+        editedBody = (raw as { body?: AnthropicRequest }).body;
+      }
+      approveHeld(request.params.requestId, editedBody);
+      return { ok: true };
+    }
+  );
+
+  app.post<{ Params: { requestId: string } }>(
+    "/api/gate/:requestId/cancel",
+    async (request) => {
+      cancelHeld(request.params.requestId);
+      return { ok: true };
+    }
+  );
 
   app.get<{ Params: SessionStatsParams }>("/api/stats/tokens/:sessionId", async (request, reply) => {
     const session = getSession(request.params.sessionId);

@@ -53,10 +53,12 @@ import {
   type RequestKind,
 } from "../ws/manager.js";
 import {
-  applyPipelines,
   inboundPipeline,
   outboundPipeline,
+  runStage,
 } from "../middleware/index.js";
+import { gate } from "./gate-singleton.js";
+import { canonical } from "./canonical-singleton.js";
 
 const STRIPPED_RESPONSE_HEADERS = new Set([
   "connection",
@@ -280,13 +282,20 @@ export async function handleRequest(
     rawLogOffset,
   });
 
+  // The body the inspector classifies should reflect what was actually
+  // forwarded upstream (post-canonical, post-injection) — not the raw replay
+  // Claude Code sends, which can include turns the user has excised.
+  // Updated below as the body progresses through canonical → outbound.
+  // The raw replay is preserved in the JSONL log via `parsedBody` above.
+  let bodyForClassification = rawBody;
+
   // Fire classification as a background task that waits for the response body.
   void responseBodyPromise.then((responseBody) =>
     classifyAndStoreRequest({
       requestId,
       timestamp: requestTimestamp,
       apiPath,
-      rawBody,
+      rawBody: bodyForClassification,
       headers,
       rawLogOffset,
       responseBody,
@@ -295,24 +304,109 @@ export async function handleRequest(
     })
   );
 
-  // Run middleware pipelines. Inbound (e.g. redaction) runs before any
-  // user-facing presentation; outbound (e.g. injection) runs before
-  // forwarding upstream. If a middleware throws, the request fails with 500.
-  let forwardBody: string;
+  // Inbound middleware (e.g. redaction) — runs before the user sees the
+  // request in the gating UI.
+  let bodyAfterInbound: string;
   try {
-    forwardBody = await applyPipelines({
+    bodyAfterInbound = await runStage({
       requestId,
       apiPath,
       headers,
       rawBody,
-      inbound: inboundPipeline,
-      outbound: outboundPipeline,
+      pipeline: inboundPipeline,
     });
   } catch (err) {
-    console.error(`[middleware] Pipeline failed for ${requestId}:`, err);
+    console.error(`[middleware] Inbound pipeline failed for ${requestId}:`, err);
     reply.status(500).send({ error: "Middleware pipeline failed" });
+    resolveResponseBody("");
     return;
   }
+
+  // Canonical conversation: for main-conversation requests, replace the
+  // incoming messages with the server-owned canonical (which may have had
+  // turns excised by previous aborts). Aux requests bypass canonical.
+  let bodyForGate = bodyAfterInbound;
+  let isMainForCanonical = false;
+  if (bodyAfterInbound) {
+    try {
+      const parsed = parseAnthropicRequest(bodyAfterInbound);
+      const kind = detectRequestKind(apiPath, parsed);
+      if (kind.isMainConversation && Array.isArray(parsed.messages)) {
+        isMainForCanonical = true;
+        const canonicalMessages = canonical.ingest(
+          parsed.messages as Array<{ role: string; content: unknown }>
+        );
+        bodyForGate = JSON.stringify({
+          ...parsed,
+          messages: canonicalMessages,
+        });
+        bodyForClassification = bodyForGate;
+      }
+    } catch {
+      // Not parseable — leave as-is.
+    }
+  }
+
+  // Gate: if enabled, hold the request until the user approves or cancels.
+  // The body presented to the user is bodyForGate (post-redaction, post-canonical).
+  let bodyAfterGate = bodyForGate;
+  if (gate.isEnabled() && bodyForGate) {
+    let parsedForGate;
+    try {
+      parsedForGate = parseAnthropicRequest(bodyForGate);
+    } catch {
+      parsedForGate = null;
+    }
+    if (parsedForGate) {
+      const decision = await gate.hold(requestId, parsedForGate);
+      if (decision.decision === "cancel") {
+        // Excise the latest user turn from canonical so it never gets
+        // forwarded — even though Claude Code's client will still replay it.
+        if (isMainForCanonical) {
+          canonical.popLastTurn();
+          canonical.noteSyntheticAppend(1);
+        }
+        // Return a synthetic 200 with a minimal assistant turn so Claude Code
+        // ends the turn cleanly rather than treating it as a retryable error.
+        const synthetic = {
+          id: `msg_mddlmn_${requestId.slice(0, 8)}`,
+          type: "message",
+          role: "assistant",
+          model: typeof parsedForGate.model === "string" ? parsedForGate.model : "claude",
+          content: [{ type: "text", text: "[cancelled by mddlmn]" }],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        };
+        reply
+          .status(200)
+          .header("content-type", "application/json")
+          .send(JSON.stringify(synthetic));
+        resolveResponseBody(JSON.stringify(synthetic));
+        return;
+      }
+      bodyAfterGate = JSON.stringify(decision.body);
+    }
+  }
+
+  // Outbound middleware (e.g. injection) — runs after user approval, before
+  // forwarding upstream. If a middleware throws, the request fails with 500.
+  let forwardBody: string;
+  try {
+    forwardBody = await runStage({
+      requestId,
+      apiPath,
+      headers,
+      rawBody: bodyAfterGate,
+      pipeline: outboundPipeline,
+    });
+  } catch (err) {
+    console.error(`[middleware] Outbound pipeline failed for ${requestId}:`, err);
+    reply.status(500).send({ error: "Middleware pipeline failed" });
+    resolveResponseBody("");
+    return;
+  }
+  bodyForClassification = forwardBody;
 
   // Forward to Anthropic.
   let response: Response;
@@ -323,6 +417,7 @@ export async function handleRequest(
     // This means Anthropic is down or unreachable, not a bug in our proxy.
     console.error(`[proxy] Forward failed for ${requestId}:`, err);
     reply.status(502).send({ error: "Failed to reach upstream API" });
+    resolveResponseBody("");
     return;
   }
 

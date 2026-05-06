@@ -1,13 +1,20 @@
 import { create } from "zustand";
 import { bridge, type BridgeStatus, type ProxyState } from "../lib/bridge";
 import type {
+  AnthropicRequestBody,
   RequestRecord,
   SectionRecord,
   SessionRecord,
   WSEvent,
 } from "../lib/types";
 
-export type TabKey = "inspector" | "diff" | "timeline" | "tokens";
+export type TabKey = "inspector" | "diff" | "timeline" | "tokens" | "gate";
+
+export interface HeldRequest {
+  requestId: string;
+  body: AnthropicRequestBody;
+  timestamp: number;
+}
 
 interface State {
   status: BridgeStatus;
@@ -22,6 +29,10 @@ interface State {
   flashIds: Set<string>; // request ids that just arrived (for animation)
   sectionsCache: Record<string, SectionRecord[]>;
   diffPairOverride: { idA: string; idB: string } | null;
+  gateEnabled: boolean;
+  gateQueueLength: number;
+  heldRequest: HeldRequest | null;
+  previousTab: TabKey | null;
 }
 
 interface Actions {
@@ -36,6 +47,9 @@ interface Actions {
   loadSections(requestId: string): Promise<SectionRecord[]>;
   setDiffPair(pair: { idA: string; idB: string } | null): void;
   clearFlash(id: string): void;
+  toggleGate(): Promise<void>;
+  approveHeld(editedBody?: AnthropicRequestBody): Promise<void>;
+  cancelHeld(): Promise<void>;
 }
 
 export const useStore = create<State & Actions>((set, get) => ({
@@ -51,6 +65,10 @@ export const useStore = create<State & Actions>((set, get) => ({
   flashIds: new Set(),
   sectionsCache: {},
   diffPairOverride: null,
+  gateEnabled: false,
+  gateQueueLength: 0,
+  heldRequest: null,
+  previousTab: null,
 
   async hydrate() {
     if (!get().proxy.running) {
@@ -68,6 +86,20 @@ export const useStore = create<State & Actions>((set, get) => ({
       }
     } catch {
       // network error — leave empty
+    }
+
+    try {
+      const status = await bridge.fetch<{
+        enabled: boolean;
+        queueLength: number;
+        currentHeldId: string | null;
+      }>("/api/gate/status");
+      set({
+        gateEnabled: status.enabled,
+        gateQueueLength: status.queueLength,
+      });
+    } catch {
+      // ignore
     }
   },
 
@@ -137,6 +169,37 @@ export const useStore = create<State & Actions>((set, get) => ({
       return { flashIds: next };
     });
   },
+
+  async toggleGate() {
+    const next = !get().gateEnabled;
+    try {
+      await bridge.post(next ? "/api/gate/enable" : "/api/gate/disable");
+    } catch {
+      // server will broadcast a status event with the truth
+    }
+  },
+
+  async approveHeld(editedBody) {
+    const held = get().heldRequest;
+    if (!held) return;
+    try {
+      await bridge.post(`/api/gate/${held.requestId}/approve`, {
+        body: editedBody,
+      });
+    } catch {
+      // ignore — server will broadcast on success
+    }
+  },
+
+  async cancelHeld() {
+    const held = get().heldRequest;
+    if (!held) return;
+    try {
+      await bridge.post(`/api/gate/${held.requestId}/cancel`);
+    } catch {
+      // ignore
+    }
+  },
 }));
 
 // Initialize bridge subscriptions once
@@ -192,6 +255,39 @@ export function initBridge(): void {
       } catch {
         // ignore
       }
+    }
+
+    if (event.type === "request_held") {
+      useStore.setState((s) => ({
+        heldRequest: {
+          requestId: event.requestId,
+          body: event.body,
+          timestamp: event.timestamp,
+        },
+        previousTab: s.tab !== "gate" ? s.tab : s.previousTab,
+        tab: "gate",
+      }));
+      return;
+    }
+
+    if (event.type === "request_released") {
+      useStore.setState((s) => {
+        if (s.heldRequest?.requestId !== event.requestId) return s;
+        return {
+          heldRequest: null,
+          tab: s.previousTab ?? "inspector",
+          previousTab: null,
+        };
+      });
+      return;
+    }
+
+    if (event.type === "gate:status") {
+      useStore.setState({
+        gateEnabled: event.enabled,
+        gateQueueLength: event.queueLength,
+      });
+      return;
     }
 
     if (event.type === "request_classified") {

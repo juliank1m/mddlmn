@@ -69,6 +69,9 @@ export interface DiffResponse {
   diff: DiffEntry[];
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnthropicRequestBody = Record<string, any>;
+
 export type WSEvent =
   | {
       type: "new_request";
@@ -84,6 +87,22 @@ export type WSEvent =
       type: "request_classified";
       requestId: string;
       sections: Array<{ type: SectionType; tokenCount: number }>;
+    }
+  | {
+      type: "request_held";
+      requestId: string;
+      sessionId: string;
+      body: AnthropicRequestBody;
+      timestamp: number;
+    }
+  | {
+      type: "request_released";
+      requestId: string;
+    }
+  | {
+      type: "gate:status";
+      enabled: boolean;
+      queueLength: number;
     };
 
 export function classify(record: RequestRecord): RequestKind {

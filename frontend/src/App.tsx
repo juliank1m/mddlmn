@@ -9,6 +9,7 @@ import { InspectorTab } from "./tabs/InspectorTab";
 import { DiffTab } from "./tabs/DiffTab";
 import { TimelineTab } from "./tabs/TimelineTab";
 import { TokensTab } from "./tabs/TokensTab";
+import { GateTab } from "./tabs/GateTab";
 import { formatTokens } from "./lib/format";
 import frontendLogo from "./assets/frontend_logo.jpeg";
 
@@ -39,6 +40,10 @@ export function App() {
   const activeSessionId = useStore((s) => s.activeSessionId);
   const requests = useStore((s) => s.requests);
   const selectedId = useStore((s) => s.selectedRequestId);
+  const gateEnabled = useStore((s) => s.gateEnabled);
+  const gateQueueLength = useStore((s) => s.gateQueueLength);
+  const heldRequest = useStore((s) => s.heldRequest);
+  const toggleGate = useStore((s) => s.toggleGate);
 
   useEffect(() => {
     initBridge();
@@ -60,24 +65,35 @@ export function App() {
           proxy={proxy}
           onStart={startProxy}
           onStop={stopProxy}
+          gateEnabled={gateEnabled}
+          gateQueueLength={gateQueueLength}
+          gateHeld={Boolean(heldRequest)}
+          onToggleGate={() => void toggleGate()}
         />
 
         <div className="grid grid-cols-[clamp(280px,26vw,360px)_1fr] flex-1 min-h-0 overflow-hidden">
           <RequestList />
           <main className="flex flex-col min-h-0 relative overflow-hidden">
-            <TabBar tab={tab} setTab={setTab} totalTokens={totalTokens} />
+            <TabBar
+              tab={tab}
+              setTab={setTab}
+              totalTokens={totalTokens}
+              showGate={Boolean(heldRequest) || gateEnabled}
+              gateHeld={Boolean(heldRequest)}
+            />
             <div className="relative flex-1 overflow-y-auto">
-              {selectedId && (
+              {selectedId && tab !== "gate" && (
                 <motion.div
                   key={selectedId + tab}
                   className="absolute inset-0 pointer-events-none scanline"
                 />
               )}
-              <div className="relative z-[1]">
+              <div className="relative z-[1] h-full">
                 {tab === "inspector" && <InspectorTab />}
                 {tab === "diff" && <DiffTab />}
                 {tab === "timeline" && <TimelineTab />}
                 {tab === "tokens" && <TokensTab />}
+                {tab === "gate" && <GateTab />}
               </div>
             </div>
           </main>
@@ -94,12 +110,20 @@ function Header({
   proxy,
   onStart,
   onStop,
+  gateEnabled,
+  gateQueueLength,
+  gateHeld,
+  onToggleGate,
 }: {
   status: ReturnType<typeof useStore.getState>["status"];
   sessionLabel?: string;
   proxy: ReturnType<typeof useStore.getState>["proxy"];
   onStart: () => void;
   onStop: () => void;
+  gateEnabled: boolean;
+  gateQueueLength: number;
+  gateHeld: boolean;
+  onToggleGate: () => void;
 }) {
   const logoSrc = window.__MDDLMN_ASSETS__?.logo ?? frontendLogo;
 
@@ -126,6 +150,36 @@ function Header({
       </div>
 
       <div className="flex-1" />
+
+      {proxy.running && (
+        <button
+          type="button"
+          onClick={onToggleGate}
+          aria-pressed={gateEnabled}
+          title={gateEnabled ? "gate is armed — requests are intercepted" : "gate is open — requests pass through"}
+          className={clsx(
+            "flex items-center gap-1.5 px-2 py-1 border text-[9px] uppercase tracking-widest2 transition-colors",
+            gateEnabled
+              ? "border-signal/60 bg-signal/10 text-signal"
+              : "border-bone-400/20 text-bone-400 hover:border-bone-400/40 hover:text-bone-200"
+          )}
+        >
+          <span
+            className={clsx(
+              "inline-block h-1.5 w-1.5 rounded-full",
+              gateEnabled
+                ? gateHeld
+                  ? "bg-signal animate-pulse shadow-[0_0_8px_rgba(252,211,77,0.8)]"
+                  : "bg-signal"
+                : "bg-bone-400/40"
+            )}
+          />
+          <span>gate</span>
+          {gateEnabled && gateQueueLength > 0 && (
+            <span className="text-signal tabular-nums">{gateQueueLength}</span>
+          )}
+        </button>
+      )}
 
       <div className="flex items-center gap-2 text-[9px] uppercase tracking-widest2 shrink-0">
         {proxy.running ? (
@@ -161,15 +215,24 @@ function TabBar({
   tab,
   setTab,
   totalTokens,
+  showGate,
+  gateHeld,
 }: {
   tab: TabKey;
   setTab: (t: TabKey) => void;
   totalTokens: number;
+  showGate: boolean;
+  gateHeld: boolean;
 }) {
+  const tabs = showGate
+    ? [...TABS, { key: "gate" as TabKey, label: "gate", symbol: "05" }]
+    : TABS;
+
   return (
     <div className="border-b border-bone-400/10 px-3 py-1.5 flex items-center gap-0.5 bg-ink-900/40">
-      {TABS.map((t) => {
+      {tabs.map((t) => {
         const active = tab === t.key;
+        const urgent = t.key === "gate" && gateHeld;
         return (
           <button
             key={t.key}
@@ -180,18 +243,23 @@ function TabBar({
               "text-[10px] uppercase tracking-widest2",
               active
                 ? "text-bone-50"
+                : urgent
+                ? "text-signal"
                 : "text-bone-400 hover:text-bone-200"
             )}
           >
             <span
               className={clsx(
                 "text-[9px] tabular-nums",
-                active ? "text-signal" : "text-bone-400/60"
+                active || urgent ? "text-signal" : "text-bone-400/60"
               )}
             >
               {t.symbol}
             </span>
             <span>{t.label}</span>
+            {urgent && !active && (
+              <span className="inline-block h-1 w-1 rounded-full bg-signal animate-pulse" />
+            )}
             {active && (
               <motion.span
                 layoutId="tab-underline"

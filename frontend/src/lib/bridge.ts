@@ -2,6 +2,7 @@ import type { WSEvent } from "./types";
 
 export interface Bridge {
   fetch<T>(endpoint: string): Promise<T>;
+  post<T>(endpoint: string, body?: unknown): Promise<T>;
   onEvent(handler: (event: WSEvent) => void): () => void;
   onStatus(handler: (status: BridgeStatus) => void): () => void;
   onProxyState(handler: (state: ProxyState) => void): () => void;
@@ -77,6 +78,15 @@ function createBrowserBridge(): Bridge {
   return {
     async fetch<T>(endpoint: string): Promise<T> {
       const res = await fetch(endpoint);
+      if (!res.ok) throw new Error(`${endpoint} returned ${res.status}`);
+      return (await res.json()) as T;
+    },
+    async post<T>(endpoint: string, body?: unknown): Promise<T> {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: body !== undefined ? { "content-type": "application/json" } : {},
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
       if (!res.ok) throw new Error(`${endpoint} returned ${res.status}`);
       return (await res.json()) as T;
     },
@@ -167,6 +177,25 @@ function createWebviewBridge(): Bridge {
           reject,
         });
         vscode.postMessage({ type: "fetch", id, endpoint });
+      });
+    },
+    post<T>(endpoint: string, body?: unknown): Promise<T> {
+      const id = crypto.randomUUID();
+      return new Promise((resolve, reject) => {
+        pending.set(id, {
+          resolve: (v) => resolve(v as T),
+          reject,
+        });
+        vscode.postMessage({
+          type: "fetch",
+          id,
+          endpoint,
+          init: {
+            method: "POST",
+            headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+            body: body !== undefined ? JSON.stringify(body) : undefined,
+          },
+        });
       });
     },
     onEvent(handler) {
