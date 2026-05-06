@@ -52,6 +52,11 @@ import {
   broadcastRequestClassified,
   type RequestKind,
 } from "../ws/manager.js";
+import {
+  applyPipelines,
+  inboundPipeline,
+  outboundPipeline,
+} from "../middleware/index.js";
 
 const STRIPPED_RESPONSE_HEADERS = new Set([
   "connection",
@@ -290,10 +295,29 @@ export async function handleRequest(
     })
   );
 
+  // Run middleware pipelines. Inbound (e.g. redaction) runs before any
+  // user-facing presentation; outbound (e.g. injection) runs before
+  // forwarding upstream. If a middleware throws, the request fails with 500.
+  let forwardBody: string;
+  try {
+    forwardBody = await applyPipelines({
+      requestId,
+      apiPath,
+      headers,
+      rawBody,
+      inbound: inboundPipeline,
+      outbound: outboundPipeline,
+    });
+  } catch (err) {
+    console.error(`[middleware] Pipeline failed for ${requestId}:`, err);
+    reply.status(500).send({ error: "Middleware pipeline failed" });
+    return;
+  }
+
   // Forward to Anthropic.
   let response: Response;
   try {
-    response = await forward(apiPath, method, headers, rawBody);
+    response = await forward(apiPath, method, headers, forwardBody);
   } catch (err) {
     // Network error talking to Anthropic — return 502 Bad Gateway.
     // This means Anthropic is down or unreachable, not a bug in our proxy.
