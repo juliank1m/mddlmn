@@ -7,6 +7,15 @@ type ContentBlock =
   | { type: "redacted_thinking" }
   | { type: "tool_use"; id: string; name: string; input: unknown };
 
+type StreamingBlock = {
+  type: string;
+  index: number;
+  accumulated: string;
+  id?: string;
+  name?: string;
+  input?: string;
+};
+
 function makeSection(type: SectionType, content: unknown, label: string): Section {
   const normalized =
     typeof content === "string" ? content : JSON.stringify(content, null, 2);
@@ -50,7 +59,7 @@ function parseJsonResponse(body: string): Section[] {
 function parseSseResponse(sseText: string): Section[] {
   // SSE events arrive as "data: {...}\n\n" lines.
   // We reconstruct the content blocks by tracking deltas.
-  const blocks: Array<{ type: string; index: number; accumulated: string; name?: string; input?: string }> = [];
+  const blocks: StreamingBlock[] = [];
 
   for (const line of sseText.split("\n")) {
     if (!line.startsWith("data: ")) continue;
@@ -73,6 +82,7 @@ function parseSseResponse(sseText: string): Section[] {
         type: (block?.type as string) ?? "text",
         index,
         accumulated: "",
+        id: block?.id as string | undefined,
         name: block?.name as string | undefined,
         input: "",
       };
@@ -119,7 +129,12 @@ function parseSseResponse(sseText: string): Section[] {
       sections.push(
         makeSection(
           "assistant_tool_call",
-          { name: block.name, input },
+          {
+            type: "tool_use",
+            id: block.id ?? "toolu_mddlmn",
+            name: block.name,
+            input,
+          },
           `Tool call: ${block.name ?? "unknown"}`
         )
       );
@@ -143,7 +158,12 @@ function contentBlocksToSections(blocks: ContentBlock[]): Section[] {
       sections.push(
         makeSection(
           "assistant_tool_call",
-          { name: block.name, input: block.input },
+          {
+            type: "tool_use",
+            id: block.id,
+            name: block.name,
+            input: block.input,
+          },
           `Tool call: ${block.name}`
         )
       );

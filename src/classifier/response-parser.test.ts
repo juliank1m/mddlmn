@@ -27,7 +27,7 @@ describe("parseResponseSections — non-streaming JSON", () => {
     expect(sections[0].type).toBe("thinking");
   });
 
-  test("emits assistant_tool_call section for tool_use block", () => {
+  test("emits assistant_tool_call section for tool_use block with full Anthropic content shape", () => {
     const sections = parseResponseSections(
       JSON.stringify({
         content: [{ type: "tool_use", id: "t1", name: "read_file", input: { path: "/x" } }],
@@ -36,8 +36,11 @@ describe("parseResponseSections — non-streaming JSON", () => {
     expect(sections).toHaveLength(1);
     expect(sections[0].type).toBe("assistant_tool_call");
     expect(sections[0].label).toContain("read_file");
-    expect(sections[0].content).toContain("read_file");
-    expect(sections[0].content).toContain("/x");
+    const parsed = JSON.parse(sections[0].content);
+    expect(parsed.type).toBe("tool_use");
+    expect(parsed.id).toBe("t1");
+    expect(parsed.name).toBe("read_file");
+    expect(parsed.input).toEqual({ path: "/x" });
   });
 
   test("skips empty text blocks", () => {
@@ -95,9 +98,9 @@ describe("parseResponseSections — streaming SSE", () => {
     expect(sections[0]?.content).toBe("thought");
   });
 
-  test("reconstructs tool_use input from input_json_delta events", () => {
+  test("reconstructs tool_use input from input_json_delta events with full Anthropic shape", () => {
     const sse = [
-      `data: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "tool_use", name: "read_file" } })}`,
+      `data: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "t1", name: "read_file" } })}`,
       `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"path":' } })}`,
       `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '"/x"}' } })}`,
     ].join("\n");
@@ -105,7 +108,11 @@ describe("parseResponseSections — streaming SSE", () => {
     const sections = parseResponseSections(sse);
     expect(sections[0]?.type).toBe("assistant_tool_call");
     expect(sections[0]?.label).toContain("read_file");
-    expect(sections[0]?.content).toContain("/x");
+    const parsed = JSON.parse(sections[0]!.content);
+    expect(parsed.type).toBe("tool_use");
+    expect(parsed.id).toBe("t1");
+    expect(parsed.name).toBe("read_file");
+    expect(parsed.input).toEqual({ path: "/x" });
   });
 
   test("ignores non-data lines and malformed JSON in events", () => {
