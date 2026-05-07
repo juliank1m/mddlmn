@@ -59,6 +59,7 @@ import {
 } from "../middleware/index.js";
 import { gate } from "./gate-singleton.js";
 import { canonical } from "./canonical-singleton.js";
+import { buildSyntheticAbort } from "./synthetic-abort.js";
 
 const STRIPPED_RESPONSE_HEADERS = new Set([
   "connection",
@@ -366,23 +367,32 @@ export async function handleRequest(
           canonical.popLastTurn();
           canonical.noteSyntheticAppend(1);
         }
-        // Return a synthetic 200 with a minimal assistant turn so Claude Code
-        // ends the turn cleanly rather than treating it as a retryable error.
-        const synthetic = {
-          id: `msg_mddlmn_${requestId.slice(0, 8)}`,
-          type: "message",
-          role: "assistant",
+        // Match the response shape the request asked for. If the request was
+        // streaming (Claude Code's main loop always streams), return a full
+        // synthetic SSE event sequence; otherwise return JSON. Returning the
+        // wrong content-type makes the SDK think the connection failed and
+        // fire a duplicate request.
+        const isStreaming = parsedForGate.stream === true;
+        const synthetic = buildSyntheticAbort({
+          requestId,
           model: typeof parsedForGate.model === "string" ? parsedForGate.model : "claude",
-          content: [{ type: "text", text: "[cancelled by mddlmn]" }],
-          stop_reason: "end_turn",
-          stop_sequence: null,
-          usage: { input_tokens: 0, output_tokens: 0 },
-        };
-        reply
-          .status(200)
-          .header("content-type", "application/json")
-          .send(JSON.stringify(synthetic));
-        resolveResponseBody(JSON.stringify(synthetic));
+          stream: isStreaming,
+        });
+        if (isStreaming) {
+          reply.raw.writeHead(200, {
+            "content-type": synthetic.contentType,
+            "cache-control": "no-cache",
+            connection: "keep-alive",
+          });
+          reply.raw.write(synthetic.body);
+          reply.raw.end();
+        } else {
+          reply
+            .status(200)
+            .header("content-type", synthetic.contentType)
+            .send(synthetic.body);
+        }
+        resolveResponseBody(synthetic.body);
         return;
       }
       bodyAfterGate = JSON.stringify(decision.body);
