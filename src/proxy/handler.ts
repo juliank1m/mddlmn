@@ -60,6 +60,7 @@ import {
 import { gate } from "./gate-singleton.js";
 import { canonical } from "./canonical-singleton.js";
 import { buildSyntheticAbort } from "./synthetic-abort.js";
+import { normalizeMessageCacheControl } from "./cache-control.js";
 
 const STRIPPED_RESPONSE_HEADERS = new Set([
   "connection",
@@ -337,9 +338,14 @@ export async function handleRequest(
         const canonicalMessages = canonical.ingest(
           parsed.messages as Array<{ role: string; content: unknown }>
         );
+        // Strip stale cache_control markers from older canonical messages
+        // and re-anchor the marker on the latest message. Without this,
+        // stale markers accumulate across turns and the request eventually
+        // exceeds Anthropic's max-4 cache_control limit.
+        const normalizedMessages = normalizeMessageCacheControl(canonicalMessages);
         bodyForGate = JSON.stringify({
           ...parsed,
-          messages: canonicalMessages,
+          messages: normalizedMessages,
         });
         bodyForClassification = bodyForGate;
       }
