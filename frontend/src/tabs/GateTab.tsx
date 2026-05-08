@@ -158,7 +158,7 @@ function BodyPreview({ body }: { body: AnthropicRequestBody }) {
 function Block({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <section>
-      <div className="text-[9px] uppercase tracking-widest2 text-bone-400 mb-1">
+      <div className="text-[9px] uppercase tracking-widest2 text-bone-200 mb-1">
         {label}
       </div>
       {children}
