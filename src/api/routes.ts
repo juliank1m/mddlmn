@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import {
   getRequest,
@@ -15,6 +16,11 @@ import {
   gate,
   setGateEnabled,
 } from "../proxy/gate-singleton.js";
+import {
+  loadRedactionRules,
+  saveRedactionRules,
+  type RedactionRule,
+} from "../middleware/redaction.js";
 import type { AnthropicRequest } from "../classifier/index.js";
 
 type IdParams = {
@@ -250,4 +256,125 @@ export async function registerApiRoutes(app: FastifyInstance): Promise<void> {
 
     return { session, points: getTokenStats(request.params.sessionId) };
   });
+
+  app.get("/api/redaction/rules", async () => {
+    return { rules: loadRedactionRules() };
+  });
+
+  app.post("/api/redaction/rules", async (request, reply) => {
+    const parsed = parseJsonBody(request.body);
+    if (!parsed || typeof parsed !== "object") {
+      return badRequest(reply, "Invalid rule body");
+    }
+
+    const draft = parsed as Partial<RedactionRule>;
+    if (typeof draft.name !== "string" || typeof draft.pattern !== "string") {
+      return badRequest(reply, "Rule requires name and pattern");
+    }
+
+    const rules = loadRedactionRules();
+    const id = typeof draft.id === "string" && draft.id.length > 0
+      ? draft.id
+      : `custom:${randomUUID()}`;
+    if (rules.some((r) => r.id === id)) {
+      return badRequest(reply, "Rule with this id already exists");
+    }
+
+    const rule: RedactionRule = {
+      id,
+      name: draft.name,
+      pattern: draft.pattern,
+      flags: typeof draft.flags === "string" ? draft.flags : "g",
+      replacement:
+        typeof draft.replacement === "string" ? draft.replacement : "[REDACTED]",
+      enabled: draft.enabled !== false,
+      builtin: false,
+    };
+
+    rules.push(rule);
+    saveRedactionRules(rules);
+    return { rule };
+  });
+
+  app.patch<{ Params: IdParams }>(
+    "/api/redaction/rules/:id",
+    async (request, reply) => {
+      const parsed = parseJsonBody(request.body);
+      if (!parsed || typeof parsed !== "object") {
+        return badRequest(reply, "Invalid update body");
+      }
+      const updates = parsed as Partial<RedactionRule>;
+
+      const rules = loadRedactionRules();
+      const idx = rules.findIndex((r) => r.id === request.params.id);
+      if (idx === -1) {
+        return notFound(reply, "Rule not found");
+      }
+
+      const current = rules[idx];
+      const next: RedactionRule = {
+        ...current,
+        // builtins can be toggled and replacement-tweaked, but pattern stays.
+        name: typeof updates.name === "string" ? updates.name : current.name,
+        pattern: current.builtin
+          ? current.pattern
+          : typeof updates.pattern === "string"
+            ? updates.pattern
+            : current.pattern,
+        flags: current.builtin
+          ? current.flags
+          : typeof updates.flags === "string"
+            ? updates.flags
+            : current.flags,
+        replacement:
+          typeof updates.replacement === "string"
+            ? updates.replacement
+            : current.replacement,
+        enabled:
+          typeof updates.enabled === "boolean"
+            ? updates.enabled
+            : current.enabled,
+        // id and builtin flag can never change
+        id: current.id,
+        builtin: current.builtin,
+      };
+
+      rules[idx] = next;
+      saveRedactionRules(rules);
+      return { rule: next };
+    }
+  );
+
+  app.delete<{ Params: IdParams }>(
+    "/api/redaction/rules/:id",
+    async (request, reply) => {
+      const rules = loadRedactionRules();
+      const idx = rules.findIndex((r) => r.id === request.params.id);
+      if (idx === -1) {
+        return notFound(reply, "Rule not found");
+      }
+      if (rules[idx].builtin) {
+        return badRequest(reply, "Cannot delete a built-in rule");
+      }
+      rules.splice(idx, 1);
+      saveRedactionRules(rules);
+      return { ok: true };
+    }
+  );
+}
+
+function parseJsonBody(body: unknown): unknown {
+  if (typeof body === "string") {
+    if (body.length === 0) return null;
+    try {
+      return JSON.parse(body);
+    } catch {
+      return null;
+    }
+  }
+  return body;
+}
+
+function badRequest(reply: FastifyReply, message: string): FastifyReply {
+  return reply.status(400).send({ error: message });
 }

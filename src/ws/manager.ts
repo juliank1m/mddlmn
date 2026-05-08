@@ -46,12 +46,19 @@ export type GateStatusEvent = {
   queueLength: number;
 };
 
+export type RedactionHitsEvent = {
+  type: "redaction:hits";
+  requestId: string;
+  hits: Array<{ ruleId: string; count: number }>;
+};
+
 export type WSEvent =
   | NewRequestEvent
   | RequestClassifiedEvent
   | RequestHeldEvent
   | RequestReleasedEvent
-  | GateStatusEvent;
+  | GateStatusEvent
+  | RedactionHitsEvent;
 
 const clients = new Set<WebSocket>();
 
@@ -110,4 +117,10 @@ export function broadcastRequestReleased(
 
 export function broadcastGateStatus(event: Omit<GateStatusEvent, "type">): void {
   broadcast({ type: "gate:status", ...event });
+}
+
+export function broadcastRedactionHits(
+  event: Omit<RedactionHitsEvent, "type">
+): void {
+  broadcast({ type: "redaction:hits", ...event });
 }

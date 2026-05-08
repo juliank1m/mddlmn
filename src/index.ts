@@ -23,7 +23,12 @@
 import Fastify from "fastify";
 import { registerApiRoutes } from "./api/routes.js";
 import { handleRequest } from "./proxy/handler.js";
-import { registerWebSocketManager } from "./ws/manager.js";
+import {
+  broadcastRedactionHits,
+  registerWebSocketManager,
+} from "./ws/manager.js";
+import { inboundPipeline } from "./middleware/index.js";
+import { createRedactionMiddleware } from "./middleware/redaction.js";
 
 const PORT = parseInt(process.env.MDDLMN_PORT ?? "8080", 10);
 
@@ -51,6 +56,13 @@ app.addContentTypeParser("*", { parseAs: "string" }, (_req, body, done) => {
 
 async function start(): Promise<void> {
   try {
+    inboundPipeline.use(
+      createRedactionMiddleware({
+        onHits: (requestId, hits) =>
+          broadcastRedactionHits({ requestId, hits }),
+      })
+    );
+
     await registerWebSocketManager(app);
     await registerApiRoutes(app);
 
