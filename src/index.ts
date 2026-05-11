@@ -24,11 +24,14 @@ import Fastify from "fastify";
 import { registerApiRoutes } from "./api/routes.js";
 import { handleRequest } from "./proxy/handler.js";
 import {
+  broadcastInjectionApplied,
   broadcastRedactionHits,
   registerWebSocketManager,
 } from "./ws/manager.js";
-import { inboundPipeline } from "./middleware/index.js";
+import { inboundPipeline, outboundPipeline } from "./middleware/index.js";
 import { createRedactionMiddleware } from "./middleware/redaction.js";
+import { createInjectionMiddleware } from "./middleware/injection.js";
+import { detectRequestKind } from "./classifier/index.js";
 
 const PORT = parseInt(process.env.MDDLMN_PORT ?? "8080", 10);
 
@@ -60,6 +63,14 @@ async function start(): Promise<void> {
       createRedactionMiddleware({
         onHits: (requestId, hits) =>
           broadcastRedactionHits({ requestId, hits }),
+      })
+    );
+
+    outboundPipeline.use(
+      createInjectionMiddleware({
+        detectKind: (apiPath, body) => detectRequestKind(apiPath, body),
+        onApplied: (requestId, applied) =>
+          broadcastInjectionApplied({ requestId, applied }),
       })
     );
 

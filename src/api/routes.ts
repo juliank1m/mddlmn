@@ -21,6 +21,13 @@ import {
   saveRedactionRules,
   type RedactionRule,
 } from "../middleware/redaction.js";
+import {
+  loadInjectionRules,
+  saveInjectionRules,
+  type InjectionRule,
+  type InjectionScope,
+  type InjectionTarget,
+} from "../middleware/injection.js";
 import type { AnthropicRequest } from "../classifier/index.js";
 
 type IdParams = {
@@ -361,6 +368,124 @@ export async function registerApiRoutes(app: FastifyInstance): Promise<void> {
       return { ok: true };
     }
   );
+
+  app.get("/api/injection/rules", async () => {
+    return { rules: loadInjectionRules() };
+  });
+
+  app.post("/api/injection/rules", async (request, reply) => {
+    const parsed = parseJsonBody(request.body);
+    if (!parsed || typeof parsed !== "object") {
+      return badRequest(reply, "Invalid rule body");
+    }
+    const draft = parsed as Partial<InjectionRule>;
+
+    if (typeof draft.name !== "string" || typeof draft.content !== "string") {
+      return badRequest(reply, "Rule requires name and content");
+    }
+    if (!isValidTarget(draft.target)) {
+      return badRequest(reply, "Invalid target");
+    }
+    if (draft.applyTo !== undefined && !isValidScope(draft.applyTo)) {
+      return badRequest(reply, "Invalid applyTo");
+    }
+
+    const rules = loadInjectionRules();
+    const id = typeof draft.id === "string" && draft.id.length > 0
+      ? draft.id
+      : `inj:${randomUUID()}`;
+    if (rules.some((r) => r.id === id)) {
+      return badRequest(reply, "Rule with this id already exists");
+    }
+
+    const rule: InjectionRule = {
+      id,
+      name: draft.name,
+      content: draft.content,
+      target: draft.target,
+      enabled: draft.enabled !== false,
+      applyTo: draft.applyTo ?? "all",
+    };
+
+    rules.push(rule);
+    saveInjectionRules(rules);
+    return { rule };
+  });
+
+  app.patch<{ Params: IdParams }>(
+    "/api/injection/rules/:id",
+    async (request, reply) => {
+      const parsed = parseJsonBody(request.body);
+      if (!parsed || typeof parsed !== "object") {
+        return badRequest(reply, "Invalid update body");
+      }
+      const updates = parsed as Partial<InjectionRule>;
+
+      if (updates.target !== undefined && !isValidTarget(updates.target)) {
+        return badRequest(reply, "Invalid target");
+      }
+      if (updates.applyTo !== undefined && !isValidScope(updates.applyTo)) {
+        return badRequest(reply, "Invalid applyTo");
+      }
+
+      const rules = loadInjectionRules();
+      const idx = rules.findIndex((r) => r.id === request.params.id);
+      if (idx === -1) {
+        return notFound(reply, "Rule not found");
+      }
+
+      const current = rules[idx];
+      const next: InjectionRule = {
+        id: current.id,
+        name: typeof updates.name === "string" ? updates.name : current.name,
+        content:
+          typeof updates.content === "string" ? updates.content : current.content,
+        target: updates.target ?? current.target,
+        applyTo: updates.applyTo ?? current.applyTo,
+        enabled:
+          typeof updates.enabled === "boolean" ? updates.enabled : current.enabled,
+      };
+      rules[idx] = next;
+      saveInjectionRules(rules);
+      return { rule: next };
+    }
+  );
+
+  app.delete<{ Params: IdParams }>(
+    "/api/injection/rules/:id",
+    async (request, reply) => {
+      const rules = loadInjectionRules();
+      const idx = rules.findIndex((r) => r.id === request.params.id);
+      if (idx === -1) {
+        return notFound(reply, "Rule not found");
+      }
+      rules.splice(idx, 1);
+      saveInjectionRules(rules);
+      return { ok: true };
+    }
+  );
+}
+
+const VALID_TARGETS: ReadonlySet<InjectionTarget> = new Set([
+  "system_prepend",
+  "system_append",
+  "user_prepend",
+  "user_append",
+  "new_user_message",
+]);
+
+const VALID_SCOPES: ReadonlySet<InjectionScope> = new Set([
+  "all",
+  "top_level",
+  "tool_chain",
+]);
+
+function isValidTarget(v: unknown): v is InjectionTarget {
+  return typeof v === "string" && VALID_TARGETS.has(v as InjectionTarget);
+}
+
+function isValidScope(v: unknown): v is InjectionScope {
+  return typeof v === "string" && VALID_SCOPES.has(v as InjectionScope);
 }
 
 function parseJsonBody(body: unknown): unknown {

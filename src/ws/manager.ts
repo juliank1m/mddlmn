@@ -52,13 +52,20 @@ export type RedactionHitsEvent = {
   hits: Array<{ ruleId: string; count: number }>;
 };
 
+export type InjectionAppliedEvent = {
+  type: "injection:applied";
+  requestId: string;
+  applied: Array<{ ruleId: string; target: string }>;
+};
+
 export type WSEvent =
   | NewRequestEvent
   | RequestClassifiedEvent
   | RequestHeldEvent
   | RequestReleasedEvent
   | GateStatusEvent
-  | RedactionHitsEvent;
+  | RedactionHitsEvent
+  | InjectionAppliedEvent;
 
 const clients = new Set<WebSocket>();
 
@@ -123,4 +130,10 @@ export function broadcastRedactionHits(
   event: Omit<RedactionHitsEvent, "type">
 ): void {
   broadcast({ type: "redaction:hits", ...event });
+}
+
+export function broadcastInjectionApplied(
+  event: Omit<InjectionAppliedEvent, "type">
+): void {
+  broadcast({ type: "injection:applied", ...event });
 }
