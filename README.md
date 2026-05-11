@@ -5,16 +5,18 @@
 <h1 align="center">mddlmn</h1>
 
 <p align="center">
-  Local observability for Anthropic API traffic from AI coding agents.
+  Local control layer for Anthropic API traffic from AI coding agents.
 </p>
 
 ---
 
-mddlmn runs as a pass-through proxy, captures request and response payloads, classifies prompt sections, stores sessions in SQLite, and exposes the captured traffic through a REST API, websocket feed, React inspector, and VS Code extension.
+mddlmn runs as a pass-through proxy that captures, classifies, and optionally rewrites Anthropic API traffic. It can hold every request for user review, strip secrets before they reach the upstream model, and inject standing instructions on the way out. Captured traffic is persisted to SQLite and surfaced through a REST API, websocket feed, React inspector, and VS Code extension.
 
-The proxy forwards requests to Anthropic unchanged apart from hop-by-hop HTTP headers. Authentication headers are passed through from the original client; API keys are not rewritten or stored.
+The proxy forwards requests to Anthropic with hop-by-hop HTTP headers stripped. Authentication headers are passed through from the original client; API keys are not rewritten or stored.
 
 ## What It Does
+
+Observability:
 
 - Proxies Anthropic API requests from tools such as Claude Code.
 - Logs raw request and response pairs as JSONL under `logs/`.
@@ -25,11 +27,25 @@ The proxy forwards requests to Anthropic unchanged apart from hop-by-hop HTTP he
 - Provides a React traffic inspector for browsing, diffing, and visualizing captured requests.
 - Provides a VS Code extension that starts the proxy, configures Claude Code's `ANTHROPIC_BASE_URL`, sets the same variable for integrated terminals, and opens the inspector in a webview.
 
+Control:
+
+- Middleware pipeline with inbound and outbound stages around the gate.
+- Request gating: hold every request at the proxy until the user approves, edits, or aborts. Aborts return a synthetic SSE `end_turn` so the agent loop completes cleanly rather than retrying.
+- Server-owned canonical conversation state so user edits and aborts persist across client replays.
+- Secret redaction with built-in rules (Anthropic, OpenAI-style, and AWS keys, PEM private key blocks) plus user-defined patterns; runs before the request is shown to the user or forwarded.
+- Prompt injection with configurable targets (system prepend/append, last user prepend/append, new user message) and scopes (`all`, `top_level`, `tool_chain`); runs after gate approval and before forwarding.
+
 ## Project Layout
 
 ```text
 .
-|-- src/                  # Fastify proxy, storage, classifier, REST API, websocket server
+|-- src/                  # Fastify proxy
+|   |-- api/              # REST routes
+|   |-- classifier/       # Request/response section parsing + token counting
+|   |-- middleware/       # Inbound/outbound pipelines (redaction, injection)
+|   |-- proxy/            # Handler, forwarder, gate, canonical conversation
+|   |-- storage/          # SQLite + JSONL logging
+|   `-- ws/               # WebSocket broadcaster
 |-- frontend/             # React + Vite traffic inspector
 |-- extension/            # VS Code extension shell and packaged webview assets
 |-- data/                 # Local SQLite database, ignored by git
@@ -81,6 +97,23 @@ export ANTHROPIC_BASE_URL=http://localhost:8080
 ```
 
 Then use the client normally. mddlmn forwards traffic to `https://api.anthropic.com`, streams responses back to the client, and records the session locally.
+
+## Control Layer
+
+Every request passes through this pipeline before reaching Anthropic:
+
+```
+capture -> inbound middleware (redaction) -> canonical conversation
+        -> gate (if armed) -> outbound middleware (injection) -> forward
+```
+
+Gate. Off by default. When enabled via `POST /api/gate/enable`, the proxy holds each incoming request and emits a `request_held` websocket event. The agent blocks on the network until the UI calls approve or cancel. Approving with an edited body forwards the edited version; cancelling returns a synthetic SSE `end_turn` so the agent loop completes without retrying.
+
+Canonical conversation. Anthropic's API is stateless, so Claude Code replays the full transcript every turn. To make user edits and aborts persist across replays, the proxy maintains its own copy of `messages` for the main conversation. Cache-control markers are normalized on the canonical view so the request never exceeds Anthropic's 4-block cache limit.
+
+Redaction (inbound). Walks the request body's text-bearing fields — system prompt, message text blocks, and `tool_result` content — replacing matches with each rule's `replacement` string. Model name, role, tool definitions, and tool-use inputs are left untouched so structural fields cannot be broken by an over-eager pattern. Built-in rules cover Anthropic API keys, OpenAI-style keys, AWS access keys, and PEM private key blocks; built-ins can be toggled but not deleted, and their patterns are read-only.
+
+Injection (outbound). Adds standing instructions or context after the gate approves and before the request is forwarded. Each rule has a `target` (`system_prepend`, `system_append`, `user_prepend`, `user_append`, `new_user_message`) and an `applyTo` scope (`all`, `top_level`, `tool_chain`). Auxiliary requests such as title generation are never injected.
 
 ## Run The Frontend
 
@@ -139,7 +172,7 @@ Open the `extension/` folder in VS Code and use the included launch configuratio
 
 The proxy reserves `/api/*` and `/ws`; all other paths are forwarded upstream to Anthropic.
 
-REST endpoints:
+Observability endpoints:
 
 - `GET /api/sessions`
 - `GET /api/sessions/:id`
@@ -150,18 +183,47 @@ REST endpoints:
 - `GET /api/diff/:idA/:idB`
 - `GET /api/stats/tokens/:sessionId`
 
+Gate endpoints:
+
+- `GET  /api/gate/status` — current enabled flag, queue length, and held request id
+- `POST /api/gate/enable`
+- `POST /api/gate/disable`
+- `POST /api/gate/:requestId/approve` — body may include `{ body: AnthropicRequest }` to forward an edited version
+- `POST /api/gate/:requestId/cancel` — returns a synthetic abort to the agent
+
+Redaction rule endpoints:
+
+- `GET    /api/redaction/rules`
+- `POST   /api/redaction/rules`
+- `PATCH  /api/redaction/rules/:id` — built-in rules can be toggled but their pattern is read-only
+- `DELETE /api/redaction/rules/:id` — built-in rules cannot be deleted
+
+Injection rule endpoints:
+
+- `GET    /api/injection/rules`
+- `POST   /api/injection/rules`
+- `PATCH  /api/injection/rules/:id`
+- `DELETE /api/injection/rules/:id`
+
 Websocket endpoint:
 
 - `GET /ws`
 
 Websocket events:
 
-- `new_request`: emitted as soon as a proxied request is captured
-- `request_classified`: emitted after the response is captured and sections are stored
+- `new_request` — proxied request captured
+- `request_classified` — response captured and sections stored
+- `request_held` — gate is holding a request awaiting decision
+- `request_released` — held request approved or cancelled
+- `gate:status` — gate enabled state or queue length changed
+- `redaction:hits` — one or more inbound redaction rules fired on a request
+- `injection:applied` — one or more outbound injection rules fired on a request
 
 ## Data Model
 
 Each proxy process creates a session. A session has many requests, and each request has ordered sections. Raw request/response pairs are written to JSONL first; normalized request metadata and classified sections are stored in SQLite for fast querying.
+
+Runtime configuration (redaction rules, injection rules) lives outside the repo in `~/.mddlmn/` so it survives extension reinstalls. Override with the `MDDLMN_CONFIG_DIR` environment variable.
 
 Local runtime files are intentionally ignored by git:
 
