@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { bridge, type BridgeStatus, type ProxyState } from "../lib/bridge";
+import { bodyToEditor, type EditorBody } from "../lib/editorModel";
 import type {
   AnthropicRequestBody,
   RequestRecord,
@@ -32,10 +33,12 @@ interface State {
   gateEnabled: boolean;
   gateQueueLength: number;
   heldRequest: HeldRequest | null;
+  editorBody: EditorBody | null;
   previousTab: TabKey | null;
 }
 
 interface Actions {
+  setEditorBody(updater: EditorBody | ((b: EditorBody) => EditorBody)): void;
   hydrate(): Promise<void>;
   startProxy(): void;
   stopProxy(): void;
@@ -68,7 +71,21 @@ export const useStore = create<State & Actions>((set, get) => ({
   gateEnabled: false,
   gateQueueLength: 0,
   heldRequest: null,
+  editorBody: null,
   previousTab: null,
+
+  setEditorBody(updater) {
+    set((s) => {
+      const current = s.editorBody;
+      const next =
+        typeof updater === "function"
+          ? current
+            ? updater(current)
+            : current
+          : updater;
+      return { editorBody: next };
+    });
+  },
 
   async hydrate() {
     if (!get().proxy.running) {
@@ -264,6 +281,7 @@ export function initBridge(): void {
           body: event.body,
           timestamp: event.timestamp,
         },
+        editorBody: bodyToEditor(event.body),
         previousTab: s.tab !== "gate" ? s.tab : s.previousTab,
         tab: "gate",
       }));
@@ -275,6 +293,7 @@ export function initBridge(): void {
         if (s.heldRequest?.requestId !== event.requestId) return s;
         return {
           heldRequest: null,
+          editorBody: null,
           tab: s.previousTab ?? "inspector",
           previousTab: null,
         };

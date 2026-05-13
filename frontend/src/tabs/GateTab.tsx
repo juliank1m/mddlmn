@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { useStore } from "../store/store";
 import type { HeldRequest } from "../store/store";
-import type { AnthropicRequestBody } from "../lib/types";
+import { HeldRequestEditor } from "../components/HeldRequestEditor";
+import { serializeForApproval } from "../lib/requestSerializer";
 
 export function GateTab() {
   const heldRequest = useStore((s) => s.heldRequest);
@@ -47,7 +48,17 @@ function Empty({
 function Held({ held, queueLength }: { held: HeldRequest; queueLength: number }) {
   const approveHeld = useStore((s) => s.approveHeld);
   const cancelHeld = useStore((s) => s.cancelHeld);
+  const editorBody = useStore((s) => s.editorBody);
   const elapsed = useElapsed(held.timestamp);
+
+  const serializeResult = editorBody ? serializeForApproval(editorBody) : null;
+  const canApprove = serializeResult?.ok === true;
+  const errors = serializeResult && !serializeResult.ok ? serializeResult.errors : [];
+
+  async function onApprove() {
+    if (!serializeResult || !serializeResult.ok) return;
+    await approveHeld(serializeResult.body);
+  }
 
   return (
     <motion.div
@@ -56,7 +67,7 @@ function Held({ held, queueLength }: { held: HeldRequest; queueLength: number })
       transition={{ duration: 0.18 }}
       className="relative flex flex-col h-full min-h-0"
     >
-      {/* leading-edge signal bar — visible reminder traffic is suspended */}
+      {/* leading-edge signal bar */}
       <div className="absolute top-0 bottom-0 left-0 w-[2px] bg-signal/80 shadow-[0_0_12px_rgba(252,211,77,0.4)]" />
 
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 pl-5">
@@ -84,7 +95,7 @@ function Held({ held, queueLength }: { held: HeldRequest; queueLength: number })
           <div className="dash-divider" />
         </header>
 
-        <BodyPreview body={held.body} />
+        <HeldRequestEditor />
       </div>
 
       {/* sticky decision bar */}
@@ -92,6 +103,14 @@ function Held({ held, queueLength }: { held: HeldRequest; queueLength: number })
         <span className="text-[9px] uppercase tracking-widest2 text-bone-400 hidden sm:block">
           decision required
         </span>
+        {!canApprove && errors.length > 0 && (
+          <span
+            className="text-[9px] uppercase tracking-widest2 text-red-300"
+            title={errors.join("\n")}
+          >
+            ✕ {errors[0]}
+          </span>
+        )}
         <div className="flex-1" />
         <button
           type="button"
@@ -102,85 +121,14 @@ function Held({ held, queueLength }: { held: HeldRequest; queueLength: number })
         </button>
         <button
           type="button"
-          onClick={() => void approveHeld()}
-          className="border border-signal/60 bg-signal/15 px-3 py-1 text-[10px] uppercase tracking-widest2 text-signal hover:bg-signal/25 transition-colors"
+          disabled={!canApprove}
+          onClick={() => void onApprove()}
+          className="border border-signal/60 bg-signal/15 px-3 py-1 text-[10px] uppercase tracking-widest2 text-signal hover:bg-signal/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-signal/15"
         >
           release
         </button>
       </div>
     </motion.div>
-  );
-}
-
-function BodyPreview({ body }: { body: AnthropicRequestBody }) {
-  const messages: unknown = body.messages;
-  const system: unknown = body.system;
-  const tools: unknown = body.tools;
-
-  const meta = Object.fromEntries(
-    Object.entries(body).filter(
-      ([k]) => k !== "messages" && k !== "system" && k !== "tools"
-    )
-  );
-
-  return (
-    <div className="space-y-3">
-      {Object.keys(meta).length > 0 && (
-        <Block label="metadata">
-          <pre className="code-block">{JSON.stringify(meta, null, 2)}</pre>
-        </Block>
-      )}
-      {system !== undefined && (
-        <Block label="system">
-          <pre className="code-block">
-            {typeof system === "string" ? system : JSON.stringify(system, null, 2)}
-          </pre>
-        </Block>
-      )}
-      {Array.isArray(tools) && tools.length > 0 && (
-        <Block label={`tools · ${tools.length}`}>
-          <pre className="code-block">{JSON.stringify(tools, null, 2)}</pre>
-        </Block>
-      )}
-      {Array.isArray(messages) && messages.length > 0 && (
-        <Block label={`messages · ${messages.length}`}>
-          <div className="space-y-2">
-            {messages.map((m, i) => (
-              <MessageRow key={i} index={i} message={m} />
-            ))}
-          </div>
-        </Block>
-      )}
-    </div>
-  );
-}
-
-function Block({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <section>
-      <div className="text-[9px] uppercase tracking-widest2 text-bone-200 mb-1">
-        {label}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function MessageRow({ index, message }: { index: number; message: unknown }) {
-  const role =
-    typeof message === "object" && message !== null && "role" in message
-      ? String((message as { role: unknown }).role)
-      : "?";
-  return (
-    <div className="border-l-2 border-bone-400/10 pl-2">
-      <div className="flex items-baseline gap-2 mb-1">
-        <span className="text-bone-400 text-[9px] tabular-nums">
-          {String(index + 1).padStart(2, "0")}
-        </span>
-        <span className="text-[9px] uppercase tracking-widest2 text-signal">{role}</span>
-      </div>
-      <pre className="code-block">{JSON.stringify(message, null, 2)}</pre>
-    </div>
   );
 }
 
