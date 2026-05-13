@@ -2,8 +2,38 @@ import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { useStore } from "../store/store";
 import type { HeldRequest } from "../store/store";
+import type { RequestKind } from "../lib/types";
 import { HeldRequestEditor } from "../components/HeldRequestEditor";
 import { serializeForApproval } from "../lib/requestSerializer";
+
+const KIND_LABELS: Record<RequestKind, string> = {
+  top_level: "TOP",
+  tool_chain: "TOOL",
+  aux: "AUX",
+};
+
+const KIND_TONES: Record<RequestKind, string> = {
+  top_level: "text-signal border-signal/40 bg-signal/10",
+  tool_chain: "text-red-300 border-red-400/40 bg-red-400/5",
+  aux: "text-bone-400 border-bone-400/30 bg-bone-400/5",
+};
+
+function KindBadge({ kind }: { kind: RequestKind }) {
+  return (
+    <span
+      className={`px-1.5 py-0.5 text-[9px] uppercase tracking-widest2 border ${KIND_TONES[kind]}`}
+      title={
+        kind === "aux"
+          ? "Auxiliary request — small probe, summarization, or count_tokens. Does NOT affect the user-facing answer."
+          : kind === "tool_chain"
+            ? "Tool-chain step in the main conversation."
+            : "Top-level user-initiated turn."
+      }
+    >
+      {KIND_LABELS[kind]}
+    </span>
+  );
+}
 
 export function GateTab() {
   const heldRequest = useStore((s) => s.heldRequest);
@@ -91,6 +121,14 @@ function Held({ held, queueLength }: { held: HeldRequest; queueLength: number })
             <code className="text-[9px] tabular-nums text-bone-400 truncate max-w-[40ch]">
               {held.requestId.slice(0, 8)}
             </code>
+          </div>
+          <div className="flex items-center gap-2 mb-1">
+            <KindBadge kind={held.kind} />
+            {typeof held.body.model === "string" && (
+              <code className="text-[10px] tabular-nums text-bone-200 truncate max-w-[44ch]">
+                {held.body.model}
+              </code>
+            )}
           </div>
           <div className="dash-divider" />
         </header>

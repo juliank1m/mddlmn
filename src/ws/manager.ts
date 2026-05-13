@@ -32,6 +32,7 @@ export type RequestHeldEvent = {
   requestId: string;
   sessionId: string;
   body: AnthropicRequest;
+  kind: RequestKind;
   timestamp: number;
 };
 

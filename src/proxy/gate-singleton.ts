@@ -8,11 +8,12 @@ import { getCurrentSessionId } from "../storage/db.js";
 
 export const gate = new Gate();
 
-gate.onHold((requestId, body) => {
+gate.onHold((requestId, body, kind) => {
   broadcastRequestHeld({
     requestId,
     sessionId: getCurrentSessionId(),
     body,
+    kind,
     timestamp: Date.now(),
   });
 });

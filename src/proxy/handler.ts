@@ -365,7 +365,14 @@ export async function handleRequest(
       parsedForGate = null;
     }
     if (parsedForGate) {
-      const decision = await gate.hold(requestId, parsedForGate);
+      const gateKind = detectRequestKind(apiPath, parsedForGate);
+      const kindForBroadcast: "top_level" | "tool_chain" | "aux" =
+        gateKind.isTopLevel
+          ? "top_level"
+          : gateKind.isMainConversation
+            ? "tool_chain"
+            : "aux";
+      const decision = await gate.hold(requestId, parsedForGate, kindForBroadcast);
       if (decision.decision === "cancel") {
         // Excise the latest user turn from canonical so it never gets
         // forwarded — even though Claude Code's client will still replay it.

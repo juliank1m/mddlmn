@@ -93,6 +93,7 @@ export type WSEvent =
       requestId: string;
       sessionId: string;
       body: AnthropicRequestBody;
+      kind: RequestKind;
       timestamp: number;
     }
   | {

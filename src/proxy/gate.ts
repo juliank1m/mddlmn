@@ -1,5 +1,7 @@
 import type { AnthropicRequest } from "../classifier/index.js";
 
+export type GateRequestKind = "top_level" | "tool_chain" | "aux";
+
 export type GateDecision =
   | { decision: "approve"; body: AnthropicRequest }
   | { decision: "cancel" };
@@ -7,10 +9,15 @@ export type GateDecision =
 interface HeldEntry {
   requestId: string;
   body: AnthropicRequest;
+  kind: GateRequestKind;
   resolve: (decision: GateDecision) => void;
 }
 
-type HoldListener = (requestId: string, body: AnthropicRequest) => void;
+type HoldListener = (
+  requestId: string,
+  body: AnthropicRequest,
+  kind: GateRequestKind
+) => void;
 
 export class Gate {
   private enabled = false;
@@ -36,6 +43,11 @@ export class Gate {
     return releasedIds;
   }
 
+  // Allow callers to peek at the kind of the currently-held request.
+  currentHeldKind(): GateRequestKind | null {
+    return this.queue[0]?.kind ?? null;
+  }
+
   queueLength(): number {
     return this.queue.length;
   }
@@ -48,15 +60,19 @@ export class Gate {
     this.holdListeners.push(listener);
   }
 
-  hold(requestId: string, body: AnthropicRequest): Promise<GateDecision> {
+  hold(
+    requestId: string,
+    body: AnthropicRequest,
+    kind: GateRequestKind
+  ): Promise<GateDecision> {
     if (!this.enabled) {
       return Promise.resolve({ decision: "approve", body });
     }
     return new Promise((resolve) => {
       const wasEmpty = this.queue.length === 0;
-      this.queue.push({ requestId, body, resolve });
+      this.queue.push({ requestId, body, kind, resolve });
       if (wasEmpty) {
-        this.notifyHold(requestId, body);
+        this.notifyHold(requestId, body, kind);
       }
     });
   }
@@ -84,14 +100,18 @@ export class Gate {
 
     if (idx === 0 && this.queue.length > 0) {
       const next = this.queue[0];
-      this.notifyHold(next.requestId, next.body);
+      this.notifyHold(next.requestId, next.body, next.kind);
     }
   }
 
-  private notifyHold(requestId: string, body: AnthropicRequest): void {
+  private notifyHold(
+    requestId: string,
+    body: AnthropicRequest,
+    kind: GateRequestKind
+  ): void {
     for (const listener of this.holdListeners) {
       try {
-        listener(requestId, body);
+        listener(requestId, body, kind);
       } catch (err) {
         console.error("[gate] onHold listener threw:", err);
       }

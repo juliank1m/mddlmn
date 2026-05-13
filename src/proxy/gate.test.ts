@@ -18,7 +18,7 @@ describe("Gate", () => {
   test("hold() resolves immediately when gate is disabled", async () => {
     const gate = new Gate();
     const body = { model: "x" };
-    const result = await gate.hold("req-1", body);
+    const result = await gate.hold("req-1", body, "top_level");
     expect(result.decision).toBe("approve");
     expect(result.body).toEqual(body);
   });
@@ -27,7 +27,7 @@ describe("Gate", () => {
     const gate = new Gate();
     gate.enable();
     let resolved = false;
-    const promise = gate.hold("req-1", { model: "x" }).then((r) => {
+    const promise = gate.hold("req-1", { model: "x" }, "top_level").then((r) => {
       resolved = true;
       return r;
     });
@@ -46,7 +46,7 @@ describe("Gate", () => {
     const original = { model: "x", marker: 1 };
     const edited = { model: "x", marker: 2 };
 
-    const promise = gate.hold("req-1", original);
+    const promise = gate.hold("req-1", original, "top_level");
     gate.approve("req-1", edited);
     const result = await promise;
 
@@ -57,7 +57,7 @@ describe("Gate", () => {
   test("cancel() resolves with cancel decision", async () => {
     const gate = new Gate();
     gate.enable();
-    const promise = gate.hold("req-1", { model: "x" });
+    const promise = gate.hold("req-1", { model: "x" }, "top_level");
     gate.cancel("req-1");
     const result = await promise;
     expect(result.decision).toBe("cancel");
@@ -73,8 +73,8 @@ describe("Gate", () => {
     const gate = new Gate();
     gate.enable();
 
-    const p1 = gate.hold("req-1", { n: 1 });
-    const p2 = gate.hold("req-2", { n: 2 });
+    const p1 = gate.hold("req-1", { n: 1 }, "top_level");
+    const p2 = gate.hold("req-2", { n: 2 }, "top_level");
 
     expect(gate.currentHeldId()).toBe("req-1");
     expect(gate.queueLength()).toBe(2);
@@ -96,8 +96,8 @@ describe("Gate", () => {
     const gate = new Gate();
     gate.enable();
 
-    const p1 = gate.hold("req-1", { n: 1 });
-    const p2 = gate.hold("req-2", { n: 2 });
+    const p1 = gate.hold("req-1", { n: 1 }, "top_level");
+    const p2 = gate.hold("req-2", { n: 2 }, "top_level");
 
     const releasedIds = gate.disable();
 
@@ -122,8 +122,8 @@ describe("Gate", () => {
     const events: string[] = [];
     gate.onHold((id) => events.push(id));
 
-    void gate.hold("req-1", { n: 1 });
-    void gate.hold("req-2", { n: 2 });
+    void gate.hold("req-1", { n: 1 }, "top_level");
+    void gate.hold("req-2", { n: 2 }, "top_level");
 
     expect(events).toEqual(["req-1"]);
 

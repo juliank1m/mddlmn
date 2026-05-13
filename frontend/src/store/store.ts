@@ -3,6 +3,7 @@ import { bridge, type BridgeStatus, type ProxyState } from "../lib/bridge";
 import { bodyToEditor, type EditorBody } from "../lib/editorModel";
 import type {
   AnthropicRequestBody,
+  RequestKind,
   RequestRecord,
   SectionRecord,
   SessionRecord,
@@ -14,6 +15,7 @@ export type TabKey = "inspector" | "diff" | "timeline" | "tokens" | "gate";
 export interface HeldRequest {
   requestId: string;
   body: AnthropicRequestBody;
+  kind: RequestKind;
   timestamp: number;
 }
 
@@ -279,6 +281,7 @@ export function initBridge(): void {
         heldRequest: {
           requestId: event.requestId,
           body: event.body,
+          kind: event.kind,
           timestamp: event.timestamp,
         },
         editorBody: bodyToEditor(event.body),
