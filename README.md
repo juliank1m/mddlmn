@@ -152,7 +152,7 @@ Package and install the VSIX:
 cd frontend && npm run build
 cp -r dist/* ../extension/webview-dist/
 cd ../extension && npm run package
-code --install-extension mddlmn-vscode-0.1.0.vsix
+code --install-extension mddlmn-0.1.1.vsix
 ```
 
 `npm run package` compiles the extension, copies and recompiles the proxy (including rebuilding `better-sqlite3` against Electron's Node), and produces the VSIX. Reload VS Code after installing.

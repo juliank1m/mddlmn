@@ -1,13 +1,37 @@
 {
-  "name": "mddlmn-vscode",
+  "name": "mddlmn",
   "displayName": "mddlmn",
-  "description": "VS Code shell for the mddlmn local AI proxy.",
-  "version": "0.1.0",
-  "publisher": "mddlmn",
+  "description": "Local control layer for Claude Code and Anthropic API traffic — inspect, edit, redact, inject, and gate every request before it leaves your machine.",
+  "version": "0.1.1",
+  "publisher": "juliank1m",
+  "license": "MIT",
+  "icon": "icon.jpeg",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/juliank1m/mddlmn.git"
+  },
+  "bugs": {
+    "url": "https://github.com/juliank1m/mddlmn/issues"
+  },
+  "homepage": "https://github.com/juliank1m/mddlmn#readme",
+  "keywords": [
+    "claude",
+    "claude code",
+    "anthropic",
+    "ai",
+    "agent",
+    "proxy",
+    "observability",
+    "llm",
+    "prompt",
+    "interceptor"
+  ],
   "engines": {
     "vscode": "^1.90.0"
   },
   "categories": [
+    "AI",
+    "Debuggers",
     "Other"
   ],
   "activationEvents": [
@@ -27,7 +51,7 @@
     "build": "tsc -p .",
     "watch": "tsc -watch -p .",
     "build:proxy": "cd .. && npm run build && cd extension && node scripts/copy-proxy.mjs",
-    "package": "npm run build && npm run build:proxy && vsce package --allow-missing-repository"
+    "package": "npm run build && npm run build:proxy && vsce package --out mddlmn-${npm_package_version}.vsix --allow-missing-repository"
   },
   "dependencies": {
     "ws": "^8.20.0"
