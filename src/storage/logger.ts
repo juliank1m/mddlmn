@@ -19,8 +19,9 @@
 
 import { open, appendFile, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
+import { configDir } from "./paths.js";
 
-export const LOG_DIR = path.resolve("logs");
+export const LOG_DIR = path.join(configDir(), "logs");
 
 // Generate a session ID when the proxy starts. This is just a timestamp
 // for now — good enough to sort files chronologically and avoid collisions.

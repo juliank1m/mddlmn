@@ -3,8 +3,9 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { Section } from "../classifier/index.js";
 import { getSessionInfo } from "./logger.js";
+import { configDir } from "./paths.js";
 
-const DATA_DIR = path.resolve("data");
+const DATA_DIR = path.join(configDir(), "data");
 const DB_FILE = path.join(DATA_DIR, "mddlmn.sqlite");
 
 mkdirSync(DATA_DIR, { recursive: true });
