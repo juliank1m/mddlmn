@@ -2,6 +2,11 @@
 
 All notable changes to the mddlmn VS Code extension.
 
+## 0.1.2
+
+- Added memory injection: a persistent store of context snippets auto-injected into requests, with `always` / `session` / `conditional` scopes and optional expiry
+- Added a settings tab for managing redaction rules, injection rules, and memory entries
+
 ## 0.1.1
 
 - Added marketplace logo
