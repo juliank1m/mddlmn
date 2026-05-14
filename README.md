@@ -31,9 +31,12 @@ Control:
 
 - Middleware pipeline with inbound and outbound stages around the gate.
 - Request gating: hold every request at the proxy until the user approves, edits, or aborts. Aborts return a synthetic SSE `end_turn` so the agent loop completes cleanly rather than retrying.
+- Section editing: a full in-UI editor for held requests — modify text, edit JSON tool definitions, drag-reorder content blocks and messages, delete with restore, swap models.
 - Server-owned canonical conversation state so user edits and aborts persist across client replays.
 - Secret redaction with built-in rules (Anthropic, OpenAI-style, and AWS keys, PEM private key blocks) plus user-defined patterns; runs before the request is shown to the user or forwarded.
 - Prompt injection with configurable targets (system prepend/append, last user prepend/append, new user message) and scopes (`all`, `top_level`, `tool_chain`); runs after gate approval and before forwarding.
+- Memory injection: a persistent store of context snippets auto-injected through the injection pipeline, with `always` / `session` / `conditional` scopes and optional expiry.
+- A settings tab in the inspector for managing redaction rules, injection rules, and memory entries.
 
 ## Project Layout
 
@@ -104,7 +107,7 @@ Every request passes through this pipeline before reaching Anthropic:
 
 ```
 capture -> inbound middleware (redaction) -> canonical conversation
-        -> gate (if armed) -> outbound middleware (injection) -> forward
+        -> gate (if armed) -> outbound middleware (injection, memory) -> forward
 ```
 
 Gate. Off by default. When enabled via `POST /api/gate/enable`, the proxy holds each incoming request and emits a `request_held` websocket event. The agent blocks on the network until the UI calls approve or cancel. Approving with an edited body forwards the edited version; cancelling returns a synthetic SSE `end_turn` so the agent loop completes without retrying.
@@ -114,6 +117,8 @@ Canonical conversation. Anthropic's API is stateless, so Claude Code replays the
 Redaction (inbound). Walks the request body's text-bearing fields — system prompt, message text blocks, and `tool_result` content — replacing matches with each rule's `replacement` string. Model name, role, tool definitions, and tool-use inputs are left untouched so structural fields cannot be broken by an over-eager pattern. Built-in rules cover Anthropic API keys, OpenAI-style keys, AWS access keys, and PEM private key blocks; built-ins can be toggled but not deleted, and their patterns are read-only.
 
 Injection (outbound). Adds standing instructions or context after the gate approves and before the request is forwarded. Each rule has a `target` (`system_prepend`, `system_append`, `user_prepend`, `user_append`, `new_user_message`) and an `applyTo` scope (`all`, `top_level`, `tool_chain`). Auxiliary requests such as title generation are never injected.
+
+Memory (outbound). A persistent store of context snippets that are auto-injected through the same apply logic as injection rules, running just after injection. Each entry has a `scope`: `always` (every request), `session` (RAM-only, gone on proxy restart), or `conditional` (injected only when a regex matches the last user message). Expired entries (`expiresAt`) are skipped.
 
 ## Run The Frontend
 
@@ -205,6 +210,13 @@ Injection rule endpoints:
 - `PATCH  /api/injection/rules/:id`
 - `DELETE /api/injection/rules/:id`
 
+Memory entry endpoints:
+
+- `GET    /api/memory`
+- `POST   /api/memory` — server assigns `id` and `createdAt`
+- `PATCH  /api/memory/:id`
+- `DELETE /api/memory/:id`
+
 Websocket endpoint:
 
 - `GET /ws`
@@ -218,12 +230,13 @@ Websocket events:
 - `gate:status` — gate enabled state or queue length changed
 - `redaction:hits` — one or more inbound redaction rules fired on a request
 - `injection:applied` — one or more outbound injection rules fired on a request
+- `memory:injected` — one or more memory entries were injected into a request
 
 ## Data Model
 
 Each proxy process creates a session. A session has many requests, and each request has ordered sections. Raw request/response pairs are written to JSONL first; normalized request metadata and classified sections are stored in SQLite for fast querying.
 
-Runtime configuration (redaction rules, injection rules) lives outside the repo in `~/.mddlmn/` so it survives extension reinstalls. Override with the `MDDLMN_CONFIG_DIR` environment variable.
+Runtime configuration (redaction rules, injection rules, memory entries) lives outside the repo in `~/.mddlmn/` so it survives extension reinstalls. Override with the `MDDLMN_CONFIG_DIR` environment variable. Session-scoped memory entries are never written to disk — they live only in RAM and are gone on proxy restart.
 
 Local runtime files are intentionally ignored by git:
 

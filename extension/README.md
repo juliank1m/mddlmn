@@ -36,6 +36,8 @@ Your API key is never read or stored — auth headers pass through unchanged.
 - **Section editing**: full in-UI editor for held requests — modify text, drag-reorder content blocks and messages, delete (with restore), edit JSON tool definitions, swap models from a dropdown
 - **Secret redaction**: built-in patterns strip Anthropic / OpenAI / AWS keys and PEM private key blocks before the request is shown or forwarded. Add your own rules at any time.
 - **Prompt injection**: append standing context to the system prompt, prepend to the last user message, or insert a new user turn — scoped to top-level conversations, tool-chain steps, or both
+- **Memory injection**: a persistent store of context snippets auto-injected into every request. Each entry is `always` on, `session`-only (gone on restart), or `conditional` (injected when a regex matches the last user message), with optional expiry.
+- **Settings tab**: manage redaction rules, injection rules, and memory entries from one panel
 - **Synthetic abort**: cancelling a held request returns a clean SSE `end_turn` so the agent loop completes instead of retrying
 
 ### Honest about what's what
@@ -62,7 +64,7 @@ agent → mddlmn proxy → api.anthropic.com
         ├─ inbound middleware  (redaction)
         ├─ canonical conversation
         ├─ gate (hold for approval / edits)
-        └─ outbound middleware (injection)
+        └─ outbound middleware (injection, memory)
 ```
 
 The proxy maintains its own canonical copy of the conversation, so edits and aborts persist across the client's stateless replays. Cache-control markers are normalized so requests never exceed Anthropic's 4-block cache limit. Aborts return a synthetic SSE `end_turn` so the agent loop completes naturally.
@@ -79,8 +81,9 @@ Everything stays on your machine, at `~/.mddlmn/`:
 | Captured request store | `~/.mddlmn/data/mddlmn.sqlite` |
 | Redaction rules | `~/.mddlmn/redaction-rules.json` |
 | Injection rules | `~/.mddlmn/injection-rules.json` |
+| Memory entries | `~/.mddlmn/memory.json` |
 
-Override the root with the `MDDLMN_CONFIG_DIR` environment variable.
+Override the root with the `MDDLMN_CONFIG_DIR` environment variable. Session-scoped memory entries are never written to disk — they live only in RAM and vanish on proxy restart.
 
 ---
 
