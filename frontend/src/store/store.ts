@@ -10,7 +10,13 @@ import type {
   WSEvent,
 } from "../lib/types";
 
-export type TabKey = "inspector" | "diff" | "timeline" | "tokens" | "gate";
+export type TabKey =
+  | "inspector"
+  | "diff"
+  | "timeline"
+  | "tokens"
+  | "gate"
+  | "settings";
 
 export interface HeldRequest {
   requestId: string;

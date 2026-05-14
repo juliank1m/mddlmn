@@ -72,6 +72,48 @@ export interface DiffResponse {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type AnthropicRequestBody = Record<string, any>;
 
+export type InjectionTarget =
+  | "system_prepend"
+  | "system_append"
+  | "user_prepend"
+  | "user_append"
+  | "new_user_message";
+
+export type InjectionScope = "all" | "top_level" | "tool_chain";
+
+export interface RedactionRule {
+  id: string;
+  name: string;
+  pattern: string;
+  flags?: string;
+  replacement: string;
+  enabled: boolean;
+  builtin: boolean;
+}
+
+export interface InjectionRule {
+  id: string;
+  name: string;
+  content: string;
+  target: InjectionTarget;
+  enabled: boolean;
+  applyTo: InjectionScope;
+}
+
+export type MemoryScope = "always" | "session" | "conditional";
+
+export interface MemoryEntry {
+  id: string;
+  name: string;
+  content: string;
+  scope: MemoryScope;
+  condition?: string;
+  target: InjectionTarget;
+  enabled: boolean;
+  createdAt: string;
+  expiresAt?: string;
+}
+
 export type WSEvent =
   | {
       type: "new_request";
@@ -104,6 +146,21 @@ export type WSEvent =
       type: "gate:status";
       enabled: boolean;
       queueLength: number;
+    }
+  | {
+      type: "redaction:hits";
+      requestId: string;
+      hits: Array<{ ruleId: string; count: number }>;
+    }
+  | {
+      type: "injection:applied";
+      requestId: string;
+      applied: Array<{ ruleId: string; target: string }>;
+    }
+  | {
+      type: "memory:injected";
+      requestId: string;
+      applied: Array<{ ruleId: string; target: string }>;
     };
 
 export function classify(record: RequestRecord): RequestKind {

@@ -10,6 +10,7 @@ import { DiffTab } from "./tabs/DiffTab";
 import { TimelineTab } from "./tabs/TimelineTab";
 import { TokensTab } from "./tabs/TokensTab";
 import { GateTab } from "./tabs/GateTab";
+import { SettingsTab } from "./tabs/SettingsTab";
 import { formatTokens } from "./lib/format";
 import frontendLogo from "./assets/frontend_logo.jpeg";
 
@@ -26,6 +27,7 @@ const TABS: Array<{ key: TabKey; label: string; symbol: string }> = [
   { key: "diff", label: "diff", symbol: "02" },
   { key: "timeline", label: "timeline", symbol: "03" },
   { key: "tokens", label: "tokens", symbol: "04" },
+  { key: "settings", label: "settings", symbol: "05" },
 ];
 
 export function App() {
@@ -82,7 +84,7 @@ export function App() {
               gateHeld={Boolean(heldRequest)}
             />
             <div className="relative flex-1 overflow-y-auto">
-              {selectedId && tab !== "gate" && (
+              {selectedId && tab !== "gate" && tab !== "settings" && (
                 <motion.div
                   key={selectedId + tab}
                   className="absolute inset-0 pointer-events-none scanline"
@@ -93,6 +95,7 @@ export function App() {
                 {tab === "diff" && <DiffTab />}
                 {tab === "timeline" && <TimelineTab />}
                 {tab === "tokens" && <TokensTab />}
+                {tab === "settings" && <SettingsTab />}
                 {tab === "gate" && <GateTab />}
               </div>
             </div>
@@ -225,7 +228,7 @@ function TabBar({
   gateHeld: boolean;
 }) {
   const tabs = showGate
-    ? [...TABS, { key: "gate" as TabKey, label: "gate", symbol: "05" }]
+    ? [...TABS, { key: "gate" as TabKey, label: "gate", symbol: "06" }]
     : TABS;
 
   return (
