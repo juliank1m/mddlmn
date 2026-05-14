@@ -25,12 +25,15 @@ import { registerApiRoutes } from "./api/routes.js";
 import { handleRequest } from "./proxy/handler.js";
 import {
   broadcastInjectionApplied,
+  broadcastMemoryInjected,
   broadcastRedactionHits,
   registerWebSocketManager,
 } from "./ws/manager.js";
 import { inboundPipeline, outboundPipeline } from "./middleware/index.js";
 import { createRedactionMiddleware } from "./middleware/redaction.js";
 import { createInjectionMiddleware } from "./middleware/injection.js";
+import { createMemoryMiddleware } from "./middleware/memory.js";
+import { getMemoryEntries } from "./middleware/memory-store.js";
 import { detectRequestKind } from "./classifier/index.js";
 
 const PORT = parseInt(process.env.MDDLMN_PORT ?? "8080", 10);
@@ -71,6 +74,17 @@ async function start(): Promise<void> {
         detectKind: (apiPath, body) => detectRequestKind(apiPath, body),
         onApplied: (requestId, applied) =>
           broadcastInjectionApplied({ requestId, applied }),
+      })
+    );
+
+    // Memory injection runs after explicit injection rules — both on the
+    // outbound pipeline, both delegating to the same apply logic.
+    outboundPipeline.use(
+      createMemoryMiddleware({
+        loadEntries: getMemoryEntries,
+        detectKind: (apiPath, body) => detectRequestKind(apiPath, body),
+        onApplied: (requestId, applied) =>
+          broadcastMemoryInjected({ requestId, applied }),
       })
     );
 

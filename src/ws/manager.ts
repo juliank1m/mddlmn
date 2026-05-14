@@ -59,6 +59,12 @@ export type InjectionAppliedEvent = {
   applied: Array<{ ruleId: string; target: string }>;
 };
 
+export type MemoryInjectedEvent = {
+  type: "memory:injected";
+  requestId: string;
+  applied: Array<{ ruleId: string; target: string }>;
+};
+
 export type WSEvent =
   | NewRequestEvent
   | RequestClassifiedEvent
@@ -66,7 +72,8 @@ export type WSEvent =
   | RequestReleasedEvent
   | GateStatusEvent
   | RedactionHitsEvent
-  | InjectionAppliedEvent;
+  | InjectionAppliedEvent
+  | MemoryInjectedEvent;
 
 const clients = new Set<WebSocket>();
 
@@ -137,4 +144,10 @@ export function broadcastInjectionApplied(
   event: Omit<InjectionAppliedEvent, "type">
 ): void {
   broadcast({ type: "injection:applied", ...event });
+}
+
+export function broadcastMemoryInjected(
+  event: Omit<MemoryInjectedEvent, "type">
+): void {
+  broadcast({ type: "memory:injected", ...event });
 }

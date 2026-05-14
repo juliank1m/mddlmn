@@ -28,6 +28,11 @@ import {
   type InjectionScope,
   type InjectionTarget,
 } from "../middleware/injection.js";
+import type { MemoryEntry, MemoryScope } from "../middleware/memory.js";
+import {
+  getMemoryEntries,
+  setMemoryEntries,
+} from "../middleware/memory-store.js";
 import type { AnthropicRequest } from "../classifier/index.js";
 
 type IdParams = {
@@ -464,6 +469,137 @@ export async function registerApiRoutes(app: FastifyInstance): Promise<void> {
       return { ok: true };
     }
   );
+
+  app.get("/api/memory", async () => {
+    return { entries: getMemoryEntries() };
+  });
+
+  app.post("/api/memory", async (request, reply) => {
+    const parsed = parseJsonBody(request.body);
+    if (!parsed || typeof parsed !== "object") {
+      return badRequest(reply, "Invalid memory body");
+    }
+    const draft = parsed as Partial<MemoryEntry>;
+
+    if (typeof draft.name !== "string" || typeof draft.content !== "string") {
+      return badRequest(reply, "Entry requires name and content");
+    }
+    if (!isValidTarget(draft.target)) {
+      return badRequest(reply, "Invalid target");
+    }
+    if (!isValidMemoryScope(draft.scope)) {
+      return badRequest(reply, "Invalid scope");
+    }
+    if (draft.scope === "conditional" && typeof draft.condition !== "string") {
+      return badRequest(reply, "Conditional entries require a condition");
+    }
+
+    const entries = getMemoryEntries();
+    const id =
+      typeof draft.id === "string" && draft.id.length > 0
+        ? draft.id
+        : `mem:${randomUUID()}`;
+    if (entries.some((e) => e.id === id)) {
+      return badRequest(reply, "Entry with this id already exists");
+    }
+
+    const entry: MemoryEntry = {
+      id,
+      name: draft.name,
+      content: draft.content,
+      scope: draft.scope,
+      condition: draft.scope === "conditional" ? draft.condition : undefined,
+      target: draft.target,
+      enabled: draft.enabled !== false,
+      createdAt: new Date().toISOString(),
+      expiresAt:
+        typeof draft.expiresAt === "string" ? draft.expiresAt : undefined,
+    };
+
+    entries.push(entry);
+    setMemoryEntries(entries);
+    return { entry };
+  });
+
+  app.patch<{ Params: IdParams }>(
+    "/api/memory/:id",
+    async (request, reply) => {
+      const parsed = parseJsonBody(request.body);
+      if (!parsed || typeof parsed !== "object") {
+        return badRequest(reply, "Invalid update body");
+      }
+      const updates = parsed as Partial<MemoryEntry>;
+
+      if (updates.target !== undefined && !isValidTarget(updates.target)) {
+        return badRequest(reply, "Invalid target");
+      }
+      if (updates.scope !== undefined && !isValidMemoryScope(updates.scope)) {
+        return badRequest(reply, "Invalid scope");
+      }
+
+      const entries = getMemoryEntries();
+      const idx = entries.findIndex((e) => e.id === request.params.id);
+      if (idx === -1) {
+        return notFound(reply, "Entry not found");
+      }
+
+      const current = entries[idx];
+      const scope = updates.scope ?? current.scope;
+      const condition =
+        updates.condition !== undefined ? updates.condition : current.condition;
+      if (scope === "conditional" && typeof condition !== "string") {
+        return badRequest(reply, "Conditional entries require a condition");
+      }
+
+      const next: MemoryEntry = {
+        id: current.id,
+        name: typeof updates.name === "string" ? updates.name : current.name,
+        content:
+          typeof updates.content === "string"
+            ? updates.content
+            : current.content,
+        scope,
+        condition: scope === "conditional" ? condition : undefined,
+        target: updates.target ?? current.target,
+        enabled:
+          typeof updates.enabled === "boolean"
+            ? updates.enabled
+            : current.enabled,
+        createdAt: current.createdAt,
+        expiresAt:
+          updates.expiresAt !== undefined
+            ? updates.expiresAt || undefined
+            : current.expiresAt,
+      };
+      entries[idx] = next;
+      setMemoryEntries(entries);
+      return { entry: next };
+    }
+  );
+
+  app.delete<{ Params: IdParams }>(
+    "/api/memory/:id",
+    async (request, reply) => {
+      const entries = getMemoryEntries();
+      const idx = entries.findIndex((e) => e.id === request.params.id);
+      if (idx === -1) {
+        return notFound(reply, "Entry not found");
+      }
+      entries.splice(idx, 1);
+      setMemoryEntries(entries);
+      return { ok: true };
+    }
+  );
+}
+
+const VALID_MEMORY_SCOPES: ReadonlySet<MemoryScope> = new Set([
+  "always",
+  "session",
+  "conditional",
+]);
+
+function isValidMemoryScope(v: unknown): v is MemoryScope {
+  return typeof v === "string" && VALID_MEMORY_SCOPES.has(v as MemoryScope);
 }
 
 const VALID_TARGETS: ReadonlySet<InjectionTarget> = new Set([
