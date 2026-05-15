@@ -160,7 +160,7 @@ cd ../extension && npm run package
 code --install-extension mddlmn-0.1.1.vsix
 ```
 
-`npm run package` compiles the extension, copies and recompiles the proxy (including rebuilding `better-sqlite3` against Electron's Node), and produces the VSIX. Reload VS Code after installing.
+`npm run package` compiles the extension, copies the proxy into `proxy-dist/`, and produces the VSIX. No platform-specific rebuild step — SQLite is provided by `node:sqlite`, built into Electron's bundled Node, so the same VSIX runs on every platform. Reload VS Code after installing.
 
 ### Development
 

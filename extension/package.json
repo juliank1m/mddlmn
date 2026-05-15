@@ -2,7 +2,7 @@
   "name": "mddlmn",
   "displayName": "mddlmn-dev",
   "description": "Local control layer for Claude Code and Anthropic API traffic — inspect, edit, redact, inject, and gate every request before it leaves your machine.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "juliankim",
   "license": "MIT",
   "icon": "icon.jpeg",

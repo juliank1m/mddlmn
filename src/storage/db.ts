@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { Section } from "../classifier/index.js";
@@ -10,9 +10,9 @@ const DB_FILE = path.join(DATA_DIR, "mddlmn.sqlite");
 
 mkdirSync(DATA_DIR, { recursive: true });
 
-const db = new Database(DB_FILE);
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
+const db = new DatabaseSync(DB_FILE);
+db.exec("PRAGMA journal_mode = WAL");
+db.exec("PRAGMA foreign_keys = ON");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
@@ -53,7 +53,7 @@ const session = getSessionInfo();
 db.prepare(
   `
     INSERT OR IGNORE INTO sessions (id, started_at, agent_type, log_file)
-    VALUES (@id, @startedAt, @agentType, @logFile)
+    VALUES ($id, $startedAt, $agentType, $logFile)
   `
 ).run({
   id: session.id,
@@ -154,7 +154,7 @@ type SectionRow = {
   content: string | null;
 };
 
-const upsertRequestStmt = db.prepare(`
+const upsertRequestStmt: StatementSync = db.prepare(`
   INSERT INTO requests (
     id,
     session_id,
@@ -170,18 +170,18 @@ const upsertRequestStmt = db.prepare(`
     raw_log_offset
   )
   VALUES (
-    @id,
-    @sessionId,
-    @timestamp,
-    @path,
-    @model,
-    @totalTokens,
-    @totalCost,
-    @isMainConversation,
-    @isTopLevel,
-    @lastUserPreview,
-    @durationMs,
-    @rawLogOffset
+    $id,
+    $sessionId,
+    $timestamp,
+    $path,
+    $model,
+    $totalTokens,
+    $totalCost,
+    $isMainConversation,
+    $isTopLevel,
+    $lastUserPreview,
+    $durationMs,
+    $rawLogOffset
   )
   ON CONFLICT(id) DO UPDATE SET
     model = excluded.model,
@@ -206,20 +206,20 @@ const insertSectionStmt = db.prepare(`
     content
   )
   VALUES (
-    @id,
-    @requestId,
-    @type,
-    @label,
-    @tokenCount,
-    @contentHash,
-    @content
+    $id,
+    $requestId,
+    $type,
+    $label,
+    $tokenCount,
+    $contentHash,
+    $content
   )
 `);
 
 const updateDurationStmt = db.prepare(`
   UPDATE requests
-  SET duration_ms = @durationMs
-  WHERE id = @id
+  SET duration_ms = $durationMs
+  WHERE id = $id
 `);
 
 const listSessionsStmt = db.prepare(`
@@ -284,21 +284,31 @@ const tokenStatsStmt = db.prepare(`
   ORDER BY requests.timestamp ASC
 `);
 
-const replaceSectionsTx = db.transaction((requestId: string, sections: Section[]) => {
-  deleteSectionsStmt.run(requestId);
+const beginStmt = db.prepare("BEGIN");
+const commitStmt = db.prepare("COMMIT");
+const rollbackStmt = db.prepare("ROLLBACK");
 
-  for (const section of sections) {
-    insertSectionStmt.run({
-      id: section.id,
-      requestId,
-      type: section.type,
-      label: section.label,
-      tokenCount: section.tokenCount,
-      contentHash: section.contentHash,
-      content: section.content,
-    });
+function replaceSectionsTx(requestId: string, sections: Section[]): void {
+  beginStmt.run();
+  try {
+    deleteSectionsStmt.run(requestId);
+    for (const section of sections) {
+      insertSectionStmt.run({
+        id: section.id,
+        requestId,
+        type: section.type,
+        label: section.label,
+        tokenCount: section.tokenCount,
+        contentHash: section.contentHash,
+        content: section.content,
+      });
+    }
+    commitStmt.run();
+  } catch (err) {
+    rollbackStmt.run();
+    throw err;
   }
-});
+}
 
 export function upsertRequest(input: RequestRecordInput): void {
   upsertRequestStmt.run({
@@ -323,14 +333,25 @@ export function getCurrentSessionId(): string {
   return session.id;
 }
 
+function asNumber(v: unknown): number {
+  if (typeof v === "bigint") return Number(v);
+  return typeof v === "number" ? v : 0;
+}
+
+function asNumberOrNull(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "bigint") return Number(v);
+  return typeof v === "number" ? v : null;
+}
+
 function sessionFromRow(row: SessionRow): SessionRecord {
   return {
     id: row.id,
     startedAt: row.started_at,
     agentType: row.agent_type,
     logFile: row.log_file,
-    requestCount: row.request_count,
-    totalTokens: row.total_tokens,
+    requestCount: asNumber(row.request_count),
+    totalTokens: asNumberOrNull(row.total_tokens),
   };
 }
 
@@ -341,13 +362,13 @@ function requestFromRow(row: RequestRow): RequestRecord {
     timestamp: row.timestamp,
     path: row.path,
     model: row.model,
-    totalTokens: row.total_tokens,
-    totalCost: row.total_cost,
+    totalTokens: asNumberOrNull(row.total_tokens),
+    totalCost: asNumberOrNull(row.total_cost),
     isMainConversation: row.is_main_conversation === 1,
     isTopLevel: row.is_top_level === 1,
     lastUserPreview: row.last_user_preview,
-    durationMs: row.duration_ms,
-    rawLogOffset: row.raw_log_offset,
+    durationMs: asNumberOrNull(row.duration_ms),
+    rawLogOffset: asNumberOrNull(row.raw_log_offset),
   };
 }
 
@@ -357,41 +378,45 @@ function sectionFromRow(row: SectionRow): SectionRecord {
     requestId: row.request_id,
     type: row.type,
     label: row.label,
-    tokenCount: row.token_count,
+    tokenCount: asNumberOrNull(row.token_count),
     contentHash: row.content_hash,
     content: row.content,
   };
 }
 
 export function listSessions(): SessionRecord[] {
-  return (listSessionsStmt.all() as SessionRow[]).map(sessionFromRow);
+  return (listSessionsStmt.all() as unknown as SessionRow[]).map(sessionFromRow);
 }
 
 export function getSession(id: string): SessionRecord | null {
-  const row = getSessionStmt.get(id) as SessionRow | undefined;
+  const row = getSessionStmt.get(id) as unknown as SessionRow | undefined;
   return row ? sessionFromRow(row) : null;
 }
 
 export function listRequestsForSession(sessionId: string): RequestRecord[] {
-  return (listRequestsForSessionStmt.all(sessionId) as RequestRow[]).map(requestFromRow);
+  return (listRequestsForSessionStmt.all(sessionId) as unknown as RequestRow[]).map(
+    requestFromRow
+  );
 }
 
 export function getRequest(id: string): RequestRecord | null {
-  const row = getRequestStmt.get(id) as RequestRow | undefined;
+  const row = getRequestStmt.get(id) as unknown as RequestRow | undefined;
   return row ? requestFromRow(row) : null;
 }
 
 export function listSectionsForRequest(requestId: string): SectionRecord[] {
-  return (listSectionsForRequestStmt.all(requestId) as SectionRow[]).map(sectionFromRow);
+  return (listSectionsForRequestStmt.all(requestId) as unknown as SectionRow[]).map(
+    sectionFromRow
+  );
 }
 
 export function getTokenStats(sessionId: string): TokenStatsPoint[] {
-  const rows = tokenStatsStmt.all(sessionId) as Array<{
+  const rows = tokenStatsStmt.all(sessionId) as unknown as Array<{
     request_id: string;
     timestamp: string;
-    total_tokens: number | null;
+    total_tokens: number | bigint | null;
     type: string | null;
-    token_count: number;
+    token_count: number | bigint;
   }>;
   const points = new Map<string, TokenStatsPoint>();
 
@@ -401,7 +426,7 @@ export function getTokenStats(sessionId: string): TokenStatsPoint[] {
       point = {
         requestId: row.request_id,
         timestamp: row.timestamp,
-        totalTokens: row.total_tokens,
+        totalTokens: asNumberOrNull(row.total_tokens),
         sectionTokens: [],
       };
       points.set(row.request_id, point);
@@ -410,7 +435,7 @@ export function getTokenStats(sessionId: string): TokenStatsPoint[] {
     if (row.type !== null) {
       point.sectionTokens.push({
         type: row.type,
-        tokenCount: row.token_count,
+        tokenCount: asNumber(row.token_count),
       });
     }
   }

@@ -2,6 +2,10 @@
 
 All notable changes to the mddlmn VS Code extension.
 
+## 0.1.3
+
+- Migrated SQLite from `better-sqlite3` (per-platform native binary) to `node:sqlite` (built into Node 22+). One VSIX now runs on every platform; no node-gyp rebuild during packaging
+
 ## 0.1.2
 
 - Added memory injection: a persistent store of context snippets auto-injected into requests, with `always` / `session` / `conditional` scopes and optional expiry
